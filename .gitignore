@@ -9,14 +9,11 @@ __pycache__/
 .vscode/
 *.swp
 
-# Data files (contain personal info)
-user_context.json
-user_training_data.json
-Activities.csv
-fixed_workout.json
-manual_fixed_workout.json
-real_fixed_workout.json
-suggested_plan.json
+# Generated data (personal/sensitive)
+data/
+*.json
+*.csv
+!package.json
 
 # Test cache
 .pytest_cache/
