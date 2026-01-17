@@ -1,11 +1,12 @@
 import streamlit as st
 import os
 import shutil
+from datetime import datetime
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage, AIMessage
 from dotenv import load_dotenv
 
-from llm_tools import fetch_user_context, save_generated_plan, execute_upload_plan
+from llm_tools import fetch_user_context, read_training_data, create_and_upload_plan
 from garmin_adapter import GarminAdapter
 
 # Load environment variables
@@ -74,48 +75,31 @@ with st.sidebar:
         
         st.caption("Click to verify Garmin connection")
 
-SYSTEM_PROMPT = """You are an expert AI Running Coach. Your goal is to help the user achieve their running goals by managing their Garmin training plan.
+SYSTEM_PROMPT = """You are an AI Running Coach that creates personalized, structured training plans.
 
-You have access to tools that interact with the user's Garmin account.
+TODAY'S DATE: {today}
 
-### WORKFLOW:
-1. **Context**: When starting or if requested, call `fetch_user_context` to understand the user's profile, recent activities, and goals.
-2. **Analysis**: Analyze the user's recent load (distance, pace) vs. their goal.
-3. **Planning**: 
-   - When asked to create a plan, design a weekly schedule (Mon-Sun).
-   - Use your knowledge of running science (periodization, 80/20 rule, tapering).
-   - Calculate specific paces based on the user's recent data or goal pace.
-   - Create the plan JSON.
-   - Call `save_generated_plan` with the JSON string.
-4. **Execution**: 
-   - After saving, SUMMARIZE the plan to the user.
-   - ASK for explicit confirmation to upload.
-   - If confirmed, call `execute_upload_plan`.
+USER'S GARMIN DATA:
+{user_context}
 
-### JSON PLAN FORMAT:
-The JSON for `save_generated_plan` must be a list of objects:
-[
-  {
-    "workoutName": "W1_Mon_Easy",
-    "scheduleDate": "YYYY-MM-DD",
-    "description": "8km Easy run",
-    "steps": [
-       {
-         "type": "WorkoutStep",
-         "intensity": "ACTIVE",  // WARMUP, ACTIVE, COOLDOWN, INTERVAL, RECOVERY, REST
-         "durationType": "DISTANCE", // or TIME
-         "durationValue": 8000, // meters or seconds
-         "targetType": "SPEED", // or NONE
-         "targetValueOne": 2.9, // m/s (min speed)
-         "targetValueTwo": 3.1  // m/s (max speed)
-       }
-    ]
-  }
-]
+TOOLS:
+1. fetch_user_context - Refresh Garmin data (summary)
+2. read_training_data - Read FULL activity details from saved file
+3. create_and_upload_plan - Create STRUCTURED workouts with intervals, pace targets, and repeats
 
-### PACING:
-- Convert paces (min/km) to m/s: Speed = 1000 / (min*60 + sec).
-- Always set targetValueOne < targetValueTwo.
+WORKOUT TYPES TO CREATE:
+- **Intervals**: Use WorkoutRepeatStep for 5x800m, 6x1000m, etc. with SPEED targets
+- **Tempo runs**: Warmup + sustained pace block + cooldown with SPEED targets  
+- **Long runs**: Simple distance with easy pace target
+- **Easy runs**: Recovery pace, no hard targets
+
+IMPORTANT:
+- ALWAYS use structured workouts with steps, NOT just text descriptions
+- Use suggested_zones speed values (m/s) for targetValueOne/Two
+- Include WARMUP and COOLDOWN in every workout
+- Use WorkoutRepeatStep for interval sessions
+- Calculate weeks until race and adjust intensity accordingly
+- Call create_and_upload_plan(confirmed=false) to preview, then confirmed=true after user approves
 """
 
 # Main content
@@ -124,13 +108,28 @@ if not st.session_state.garmin_connected:
 elif not os.environ.get("OPENAI_API_KEY"):
     st.info("👈 Please enter your OpenAI API key in the sidebar.")
 else:
-    # Initialize Agent
+    # Auto-fetch user context on first load
+    if "user_context" not in st.session_state:
+        with st.spinner("Fetching your Garmin data..."):
+            try:
+                # Call the tool function directly (not through the agent)
+                context = fetch_user_context.invoke({})
+                st.session_state.user_context = context
+            except Exception as e:
+                st.session_state.user_context = f"Error fetching data: {e}"
+    
+    # Initialize Agent with user context in system prompt
     if "agent" not in st.session_state:
-        tools = [fetch_user_context, save_generated_plan, execute_upload_plan]
+        tools = [fetch_user_context, read_training_data, create_and_upload_plan]
+        today = datetime.now().strftime("%Y-%m-%d")
+        populated_prompt = SYSTEM_PROMPT.format(
+            today=today,
+            user_context=st.session_state.user_context
+        )
         st.session_state.agent = create_agent(
-            "openai:gpt-4o-mini",
+            "openai:gpt-4o",  # Using smarter model
             tools=tools,
-            system_prompt=SYSTEM_PROMPT,
+            system_prompt=populated_prompt,
         )
 
     # Display Chat History
