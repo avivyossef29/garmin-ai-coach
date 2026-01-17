@@ -1,6 +1,14 @@
-garminconnect
+# Core
 streamlit
-langchain-openai
 python-dotenv
+
+# LLM
 langchain
+langchain-openai
+
+# Garmin
+garminconnect
+requests
+
+# Testing (optional - can be removed for production)
 pytest

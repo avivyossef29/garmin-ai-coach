@@ -9,12 +9,22 @@ PROJECT_DIR = Path(__file__).parent
 SUGGESTED_PLAN_FILE = PROJECT_DIR / "suggested_plan.json"
 USER_TRAINING_DATA_FILE = PROJECT_DIR / "user_training_data.json"
 
+# Global adapter - set by app.py after successful login
+_shared_adapter = None
+
+
+def set_adapter(adapter):
+    """Set the shared Garmin adapter (called by app.py after login)."""
+    global _shared_adapter
+    _shared_adapter = adapter
+
 
 def _get_adapter():
-    """Get a connected Garmin adapter."""
-    adapter = GarminAdapter()
-    adapter.login()
-    return adapter
+    """Get the shared authenticated Garmin adapter."""
+    global _shared_adapter
+    if _shared_adapter is None:
+        raise RuntimeError("Garmin adapter not set. Please login first.")
+    return _shared_adapter
 
 
 def _seconds_to_pace(seconds_per_km):

@@ -12,12 +12,14 @@ class GarminAdapter:
         self.email = email or os.environ.get("GARMIN_EMAIL")
         self.password = password or os.environ.get("GARMIN_PASSWORD")
         self.client = None
-        self.tokenstore_path = os.path.expanduser("~/.garminconnect")
         self._mfa_required = False
 
     def login(self, mfa_code=None):
         """
         Authenticate with Garmin Connect.
+        
+        Tokens are kept in memory (self.client) and NOT persisted to filesystem.
+        This ensures proper session isolation in multi-user deployments.
         
         Args:
             mfa_code: Optional 2FA code. If None and 2FA is required, raises MFARequiredError.
@@ -37,18 +39,9 @@ class GarminAdapter:
 
         self.client = Garmin(self.email, self.password, prompt_mfa=prompt_mfa)
 
-        # Try with stored tokens first
-        if os.path.exists(self.tokenstore_path):
-            try:
-                self.client.login(tokenstore=self.tokenstore_path)
-                return True
-            except Exception:
-                pass  # Tokens expired, try fresh login
-
-        # Fresh login
+        # Always do fresh login - tokens are kept in memory only
         try:
             self.client.login()
-            self.client.garth.dump(self.tokenstore_path)
             return True
         except MFARequiredError:
             raise  # Re-raise for the caller to handle

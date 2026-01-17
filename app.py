@@ -6,7 +6,7 @@ from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage, AIMessage
 from dotenv import load_dotenv
 
-from llm_tools import fetch_user_context, read_training_data, create_and_upload_plan
+from llm_tools import fetch_user_context, read_training_data, create_and_upload_plan, set_adapter
 from garmin_adapter import GarminAdapter, MFARequiredError
 
 # Load environment variables
@@ -37,6 +37,8 @@ def attempt_garmin_login(email, password, mfa_code=None):
         adapter = GarminAdapter(email=email, password=password)
         adapter.login(mfa_code=mfa_code)
         name = adapter.client.get_full_name()
+        # Store the authenticated adapter for use by llm_tools
+        set_adapter(adapter)
         # Store credentials in environment for future use in this session
         os.environ["GARMIN_EMAIL"] = email
         os.environ["GARMIN_PASSWORD"] = password
