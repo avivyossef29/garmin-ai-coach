@@ -165,7 +165,9 @@ class GarminAdapter:
             response = self.client.garth.post("connectapi", url, json=payload, api=True)
             return response.json()
         except Exception as e:
-            print(f"    Warning: Could not schedule to calendar: {e}")
+            # Known Garmin API issue as of Jan 2026 - scheduling endpoint is broken
+            # See: https://forums.garmin.com/apps-software/mobile-apps-web/f/garmin-connect-web/428777
+            print(f"    Note: Workout created but scheduling failed (known Garmin API issue): {e}")
             return None
 
     def get_existing_workouts(self, limit=200):
