@@ -1,0 +1,6 @@
+garminconnect
+streamlit
+langchain-openai
+python-dotenv
+langchain
+pytest
