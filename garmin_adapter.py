@@ -3,44 +3,59 @@ import json
 from garminconnect import Garmin
 from datetime import datetime, timedelta
 
+class MFARequiredError(Exception):
+    """Raised when 2FA code is required."""
+    pass
+
 class GarminAdapter:
     def __init__(self, email=None, password=None):
         self.email = email or os.environ.get("GARMIN_EMAIL")
         self.password = password or os.environ.get("GARMIN_PASSWORD")
         self.client = None
         self.tokenstore_path = os.path.expanduser("~/.garminconnect")
+        self._mfa_required = False
 
-    def login(self):
+    def login(self, mfa_code=None):
         """
         Authenticate with Garmin Connect.
-        Uses stored tokens if available, otherwise performs fresh login.
+        
+        Args:
+            mfa_code: Optional 2FA code. If None and 2FA is required, raises MFARequiredError.
+        
+        Returns:
+            True if login successful
+            
+        Raises:
+            MFARequiredError: If 2FA code is needed but not provided
         """
         def prompt_mfa():
-            print("\n" + "=" * 50)
-            print("2FA CODE REQUIRED")
-            print("=" * 50)
-            print("Garmin has sent an authentication code to your email.")
-            code = input("\nEnter the 2FA code: ").strip()
-            return code
+            if mfa_code:
+                return mfa_code
+            # Signal that MFA is required
+            self._mfa_required = True
+            raise MFARequiredError("2FA code required")
 
         self.client = Garmin(self.email, self.password, prompt_mfa=prompt_mfa)
 
-        login_success = False
+        # Try with stored tokens first
         if os.path.exists(self.tokenstore_path):
-            print("Found existing tokens, attempting to use them...")
             try:
                 self.client.login(tokenstore=self.tokenstore_path)
-                print("✓ Login Successful (using stored tokens)!")
-                login_success = True
-            except Exception as e:
-                print(f"Stored tokens expired or invalid: {e}")
+                return True
+            except Exception:
+                pass  # Tokens expired, try fresh login
 
-        if not login_success:
-            print("Performing fresh login...")
-            print("(You may be prompted for a 2FA code)")
+        # Fresh login
+        try:
             self.client.login()
             self.client.garth.dump(self.tokenstore_path)
-            print(f"✓ Login Successful! Tokens saved to {self.tokenstore_path}")
+            return True
+        except MFARequiredError:
+            raise  # Re-raise for the caller to handle
+        except Exception as e:
+            if "MFA" in str(e).upper() or self._mfa_required:
+                raise MFARequiredError("2FA code required")
+            raise
 
     def fetch_user_data(self, days_back=7):
         """

@@ -7,7 +7,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 from dotenv import load_dotenv
 
 from llm_tools import fetch_user_context, read_training_data, create_and_upload_plan
-from garmin_adapter import GarminAdapter
+from garmin_adapter import GarminAdapter, MFARequiredError
 
 # Load environment variables
 load_dotenv()
@@ -23,57 +23,64 @@ st.set_page_config(page_title="Garmin AI Coach", page_icon="🏃", layout="wide"
 st.title("🏃 Garmin AI Running Coach")
 
 
-def check_garmin_connection():
-    """Check if we can connect to Garmin and return user info."""
+def attempt_garmin_login(email, password, mfa_code=None):
+    """
+    Attempt to login to Garmin.
+    
+    Returns:
+        (success, result, needs_mfa)
+        - success: True if login succeeded
+        - result: User name on success, error message on failure
+        - needs_mfa: True if 2FA code is required
+    """
     try:
-        adapter = GarminAdapter()
-        adapter.login()
+        adapter = GarminAdapter(email=email, password=password)
+        adapter.login(mfa_code=mfa_code)
         name = adapter.client.get_full_name()
-        return True, name
+        # Store credentials in environment for future use in this session
+        os.environ["GARMIN_EMAIL"] = email
+        os.environ["GARMIN_PASSWORD"] = password
+        return True, name, False
+    except MFARequiredError:
+        # Store credentials for step 2
+        os.environ["GARMIN_EMAIL"] = email
+        os.environ["GARMIN_PASSWORD"] = password
+        return False, "2FA code required", True
     except Exception as e:
-        return False, str(e)
+        return False, str(e), False
 
 
 # Initialize session state
 if "garmin_connected" not in st.session_state:
     st.session_state.garmin_connected = False
     st.session_state.garmin_user = None
+    st.session_state.awaiting_mfa = False
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Sidebar
-with st.sidebar:
-    st.header("Settings")
-    
-    # OpenAI
-    st.subheader("OpenAI")
-    api_key = st.text_input("API Key", type="password", key="openai_key")
-    if api_key:
-        os.environ["OPENAI_API_KEY"] = api_key
-    
-    if os.environ.get("OPENAI_API_KEY"):
-        st.success("✓ API Key configured")
-    else:
-        st.warning("Enter your OpenAI API key")
+# Check for API key from environment (set once, invisible to user)
+if not os.environ.get("OPENAI_API_KEY"):
+    # Only show API key input if not configured in .env
+    with st.sidebar:
+        st.header("⚙️ Setup Required")
+        api_key = st.text_input("OpenAI API Key", type="password", key="openai_key", 
+                                help="Get your key from platform.openai.com")
+        if api_key:
+            os.environ["OPENAI_API_KEY"] = api_key
+            st.rerun()
 
-    # Garmin Connection
-    st.subheader("Garmin Connect")
-    
+# Sidebar - Only show status when connected
+with st.sidebar:
     if st.session_state.garmin_connected:
-        st.success(f"✓ Connected as {st.session_state.garmin_user}")
-    else:
-        if st.button("🔗 Connect to Garmin", use_container_width=True):
-            with st.spinner("Connecting to Garmin..."):
-                success, result = check_garmin_connection()
-                if success:
-                    st.session_state.garmin_connected = True
-                    st.session_state.garmin_user = result
-                    st.rerun()
-                else:
-                    st.error(f"Connection failed: {result}")
-        
-        st.caption("Click to verify Garmin connection")
+        st.success(f"🏃 {st.session_state.garmin_user}")
+        if st.button("Clear Chat", use_container_width=True):
+            st.session_state.messages = []
+            if "agent" in st.session_state:
+                del st.session_state.agent
+            if "user_context" in st.session_state:
+                del st.session_state.user_context
+            st.rerun()
 
 SYSTEM_PROMPT = """You are an AI Running Coach that creates personalized, structured training plans.
 
@@ -102,11 +109,61 @@ IMPORTANT:
 - Call create_and_upload_plan(confirmed=false) to preview, then confirmed=true after user approves
 """
 
-# Main content
-if not st.session_state.garmin_connected:
-    st.info("👈 Please connect to Garmin first using the sidebar button.")
-elif not os.environ.get("OPENAI_API_KEY"):
-    st.info("👈 Please enter your OpenAI API key in the sidebar.")
+# Main content - Connection flow
+if not os.environ.get("OPENAI_API_KEY"):
+    st.info("👈 Please enter your OpenAI API key in the sidebar to get started.")
+elif not st.session_state.garmin_connected:
+    # Garmin Connection UI - Main area (not sidebar)
+    st.markdown("### Connect to Garmin")
+    st.markdown("To create personalized workouts, we need to connect to your Garmin account.")
+    
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        # Step 1: Email/Password
+        if not st.session_state.awaiting_mfa:
+            garmin_email = st.text_input("Garmin Email", key="garmin_email", 
+                                          placeholder="your.email@example.com")
+            garmin_password = st.text_input("Garmin Password", type="password", key="garmin_password")
+            
+            if st.button("🔗 Connect to Garmin", use_container_width=True, type="primary", 
+                         disabled=not (garmin_email and garmin_password)):
+                with st.spinner("Connecting to Garmin..."):
+                    success, result, needs_mfa = attempt_garmin_login(garmin_email, garmin_password)
+                    if success:
+                        st.session_state.garmin_connected = True
+                        st.session_state.garmin_user = result
+                        st.rerun()
+                    elif needs_mfa:
+                        st.session_state.awaiting_mfa = True
+                        st.rerun()
+                    else:
+                        st.error(f"Connection failed: {result}")
+        
+        # Step 2: 2FA Code
+        else:
+            st.info("📧 A 2FA code has been sent to your email.")
+            mfa_code = st.text_input("Enter 2FA Code", key="mfa_code", 
+                                      placeholder="123456", max_chars=6)
+            
+            col_a, col_b = st.columns(2)
+            with col_a:
+                if st.button("✓ Submit Code", use_container_width=True, type="primary",
+                             disabled=not mfa_code):
+                    with st.spinner("Verifying..."):
+                        email = os.environ.get("GARMIN_EMAIL", "")
+                        password = os.environ.get("GARMIN_PASSWORD", "")
+                        success, result, _ = attempt_garmin_login(email, password, mfa_code=mfa_code)
+                        if success:
+                            st.session_state.garmin_connected = True
+                            st.session_state.garmin_user = result
+                            st.session_state.awaiting_mfa = False
+                            st.rerun()
+                        else:
+                            st.error(f"Verification failed: {result}")
+            with col_b:
+                if st.button("← Back", use_container_width=True):
+                    st.session_state.awaiting_mfa = False
+                    st.rerun()
 else:
     # Auto-fetch user context on first load
     if "user_context" not in st.session_state:
@@ -131,6 +188,31 @@ else:
             tools=tools,
             system_prompt=populated_prompt,
         )
+        
+        # Generate initial greeting with user summary
+        if len(st.session_state.messages) == 0:
+            with st.spinner("Analyzing your training data..."):
+                try:
+                    intro_response = st.session_state.agent.invoke({
+                        "messages": [HumanMessage(content="""Introduce yourself briefly as an AI Running Coach, then summarize what you know about me:
+- Name
+- Training goal (race name, date, level)
+- Race predictions (5K, 10K, Half, Marathon paces)
+- Lactate threshold
+- Recent training summary
+- Suggested training zones
+
+Keep it concise but complete. End by asking: "Is there anything else I should know about you before we start planning? (e.g., injuries, schedule constraints, preferences) If not, just let me know how I can help with your training!"
+""")]
+                    })
+                    intro_message = intro_response["messages"][-1].content
+                    st.session_state.messages.append({"role": "assistant", "content": intro_message})
+                except Exception as e:
+                    # Fallback greeting
+                    st.session_state.messages.append({
+                        "role": "assistant", 
+                        "content": "👋 Hi! I'm your AI Running Coach. I've analyzed your Garmin data and I'm ready to help you train. Is there anything I should know about you before we start planning? If not, let me know how I can help!"
+                    })
 
     # Display Chat History
     for message in st.session_state.messages:

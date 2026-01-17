@@ -18,5 +18,11 @@ manual_fixed_workout.json
 real_fixed_workout.json
 suggested_plan.json
 
+# Test cache
+.pytest_cache/
+
+# Garmin tokens (sensitive)
+.garminconnect/
+
 # OS
 .DS_Store
