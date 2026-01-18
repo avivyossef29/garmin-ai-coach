@@ -50,6 +50,32 @@ if not os.path.exists(".env") and os.path.exists("env.example"):
 # Page Config
 st.set_page_config(page_title="Garmin AI Coach", page_icon="🏃", layout="wide")
 
+# Custom CSS for bigger fonts
+st.markdown("""
+<style>
+    /* Main content text */
+    .stMarkdown, .stText, p, li {
+        font-size: 1.1rem !important;
+    }
+    
+    /* Chat messages */
+    .stChatMessage p {
+        font-size: 1.15rem !important;
+        line-height: 1.6 !important;
+    }
+    
+    /* Input fields */
+    .stTextInput input, .stTextArea textarea {
+        font-size: 1.1rem !important;
+    }
+    
+    /* Buttons */
+    .stButton button {
+        font-size: 1.1rem !important;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 # Title
 st.title("🏃 Garmin AI Running Coach")
 
