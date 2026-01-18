@@ -326,3 +326,70 @@ def create_and_upload_plan(plan_json: str, confirmed: bool = False) -> str:
         return f"Error: Invalid JSON - {e}"
     except Exception as e:
         return f"Error: {str(e)}"
+
+
+@tool
+def get_training_status() -> str:
+    """
+    Gets the user's current training status from Garmin.
+    
+    Includes:
+    - VO2 Max
+    - Training load (7-day acute, 28-day chronic)
+    - Training status (productive, maintaining, detraining, etc.)
+    - Recovery time
+    - Load focus (anaerobic, high aerobic, low aerobic)
+    
+    Use this to understand the user's current fitness level and training balance.
+    
+    Returns:
+        JSON with training status metrics
+    """
+    try:
+        adapter = _get_adapter()
+        today = datetime.now().strftime("%Y-%m-%d")
+        
+        result = {}
+        
+        # Training status
+        try:
+            status = adapter.client.get_training_status(today)
+            if status:
+                result["training_status"] = {
+                    "status": status.get("trainingStatusPhrase"),
+                    "vo2_max": status.get("vo2MaxPreciseValue"),
+                    "acute_load": status.get("acuteTrainingLoad"),
+                    "chronic_load": status.get("chronicTrainingLoad"),
+                    "load_focus": status.get("trainingLoadBalancePhrase"),
+                }
+        except Exception as e:
+            result["training_status_error"] = str(e)
+        
+        # Training readiness
+        try:
+            readiness = adapter.client.get_training_readiness(today)
+            if readiness:
+                result["readiness"] = {
+                    "score": readiness.get("score"),
+                    "level": readiness.get("level"),
+                    "recovery_time_hours": readiness.get("recoveryTimeInHours"),
+                }
+        except Exception as e:
+            result["readiness_error"] = str(e)
+        
+        # HRV data
+        try:
+            hrv = adapter.client.get_hrv_data(today)
+            if hrv:
+                result["hrv"] = {
+                    "weekly_average": hrv.get("hrvSummary", {}).get("weeklyAvg"),
+                    "last_night": hrv.get("hrvSummary", {}).get("lastNightAvg"),
+                    "status": hrv.get("hrvSummary", {}).get("status"),
+                }
+        except Exception as e:
+            result["hrv_error"] = str(e)
+        
+        return json.dumps(result, indent=2, ensure_ascii=False)
+        
+    except Exception as e:
+        return f"Error getting training status: {str(e)}"
