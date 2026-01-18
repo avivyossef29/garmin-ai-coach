@@ -111,31 +111,31 @@ with st.sidebar:
                 del st.session_state.user_context
             st.rerun()
 
-SYSTEM_PROMPT = """You are an AI Running Coach that creates personalized, structured training plans.
+SYSTEM_PROMPT = """You are an AI Running Coach with access to the user's Garmin data.
 
 TODAY'S DATE: {today}
 
 USER'S GARMIN DATA:
 {user_context}
 
+YOU CAN HELP WITH:
+- **Training Analysis**: "How did my week go?", "Am I training too hard?"
+- **Fitness Insights**: "What's my VO2max?", "Am I recovered enough to train hard today?"
+- **Workout Planning**: Create single workouts or full training weeks
+- **Race Preparation**: Taper plans, race-day pacing, goal setting
+- **General Coaching**: Answer training questions, explain concepts
+
 TOOLS:
-1. fetch_user_context - Refresh Garmin data (summary)
-2. read_training_data - Read FULL activity details from saved file
-3. create_and_upload_plan - Create STRUCTURED workouts with intervals, pace targets, and repeats
+1. fetch_user_context - Refresh Garmin data (profile, goals, recent runs)
+2. read_training_data - Get detailed activity data (splits, HR, cadence)
+3. get_fitness_metrics - Get VO2max, training load, HRV, readiness
+4. create_and_upload_plan - Create and upload workouts to Garmin
 
-WORKOUT TYPES TO CREATE:
-- **Intervals**: Use WorkoutRepeatStep for 5x800m, 6x1000m, etc. with SPEED targets
-- **Tempo runs**: Warmup + sustained pace block + cooldown with SPEED targets  
-- **Long runs**: Simple distance with easy pace target
-- **Easy runs**: Recovery pace, no hard targets
-
-IMPORTANT:
-- ALWAYS use structured workouts with steps, NOT just text descriptions
-- Use suggested_zones speed values (m/s) for targetValueOne/Two
-- Include WARMUP and COOLDOWN in every workout
-- Use WorkoutRepeatStep for interval sessions
-- Calculate weeks until race and adjust intensity accordingly
-- Call create_and_upload_plan(confirmed=false) to preview, then confirmed=true after user approves
+WHEN CREATING WORKOUTS:
+- Use structured workouts with steps (warmup, intervals, cooldown)
+- Use WorkoutRepeatStep for intervals (5x800m, 6x1000m, etc.)
+- Use suggested_zones speed values (m/s) for pace targets
+- Preview first (confirmed=false), then upload after user approves
 """
 
 # Main content - Connection flow
@@ -223,15 +223,15 @@ else:
             with st.spinner("Analyzing your training data..."):
                 try:
                     intro_response = st.session_state.agent.invoke({
-                        "messages": [HumanMessage(content="""Introduce yourself briefly as an AI Running Coach, then summarize what you know about me:
-- Name
-- Training goal (race name, date, level)
-- Race predictions (5K, 10K, Half, Marathon paces)
-- Lactate threshold
-- Recent training summary
-- Suggested training zones
+                        "messages": [HumanMessage(content="""Introduce yourself as an AI Running Coach. Briefly summarize what you know about the user:
+- Name and current fitness level
+- Training goal (if any race planned)
+- Recent training highlights
+- Key metrics (race predictions, suggested paces)
 
-Keep it concise but complete. End by asking: "Is there anything else I should know about you before we start planning? (e.g., injuries, schedule constraints, preferences) If not, just let me know how I can help with your training!"
+Keep it concise (5-6 sentences max). 
+
+End with: "Is there anything else I should know about you? (injuries, schedule, preferences) Otherwise, how can I help today? I can analyze your training, check your fitness metrics, create workouts, or answer any running questions!"
 """)]
                     })
                     intro_message = intro_response["messages"][-1].content
@@ -240,7 +240,7 @@ Keep it concise but complete. End by asking: "Is there anything else I should kn
                     # Fallback greeting
                     st.session_state.messages.append({
                         "role": "assistant", 
-                        "content": "👋 Hi! I'm your AI Running Coach. I've analyzed your Garmin data and I'm ready to help you train. Is there anything I should know about you before we start planning? If not, let me know how I can help!"
+                        "content": "👋 Hi! I'm your AI Running Coach. I've connected to your Garmin data and I'm ready to help. I can analyze your training, check your fitness metrics, create workouts, or answer running questions. What would you like to do?"
                     })
 
     # Display Chat History
