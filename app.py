@@ -250,7 +250,7 @@ else:
             user_context=st.session_state.user_context
         )
         st.session_state.agent = create_agent(
-            "openai:gpt-4o",  # Using smarter model
+            "openai:gpt-5-mini",  
             tools=tools,
             system_prompt=populated_prompt,
         )
