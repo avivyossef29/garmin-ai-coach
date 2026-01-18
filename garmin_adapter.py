@@ -37,16 +37,21 @@ class GarminAdapter:
             self._mfa_required = True
             raise MFARequiredError("2FA code required")
 
+        # Always create fresh client - Garmin handles MFA in the same login flow
+        # When mfa_code is provided, it will be returned by prompt_mfa callback
         self.client = Garmin(self.email, self.password, prompt_mfa=prompt_mfa)
 
-        # Always do fresh login - tokens are kept in memory only
         try:
             self.client.login()
             return True
         except MFARequiredError:
             raise  # Re-raise for the caller to handle
         except Exception as e:
-            if "MFA" in str(e).upper() or self._mfa_required:
+            error_str = str(e).upper()
+            if "MFA" in error_str or self._mfa_required:
+                raise MFARequiredError("2FA code required")
+            if "UNEXPECTED TITLE" in error_str and "MFA" in error_str:
+                # Garmin is showing MFA page - need code
                 raise MFARequiredError("2FA code required")
             raise
 

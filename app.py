@@ -23,7 +23,9 @@ def friendly_error(error):
         return "Two-factor authentication required."
     elif "timeout" in error_str or "timed out" in error_str:
         return "Connection timed out. Please try again."
-    elif "network" in error_str or "connection" in error_str:
+    elif "name resolution" in error_str or "failed to resolve" in error_str:
+        return "Network error. Please check your internet connection and try again."
+    elif "connectionerror" in error_str or "connection" in error_str:
         return "Network error. Please check your internet connection."
     elif "rate limit" in error_str or "429" in error_str:
         return "Too many requests. Please wait a moment and try again."
@@ -31,6 +33,8 @@ def friendly_error(error):
         return "Service temporarily unavailable. Please try again later."
     elif "openai" in error_str or "api_key" in error_str:
         return "OpenAI API key is invalid or missing."
+    elif "invalid" in error_str and "code" in error_str:
+        return "Invalid 2FA code. Please check and try again."
     else:
         # Keep it short - just the first line, no stack trace
         first_line = str(error).split('\n')[0]
@@ -61,17 +65,24 @@ def attempt_garmin_login(email, password, mfa_code=None):
         - needs_mfa: True if 2FA code is required
     """
     try:
-        adapter = GarminAdapter(email=email, password=password)
-        adapter.login(mfa_code=mfa_code)
+        # Reuse existing adapter for MFA step (same session required!)
+        if mfa_code and "pending_adapter" in st.session_state:
+            adapter = st.session_state.pending_adapter
+            adapter.login(mfa_code=mfa_code)
+        else:
+            adapter = GarminAdapter(email=email, password=password)
+            adapter.login(mfa_code=mfa_code)
+        
         name = adapter.client.get_full_name()
         # Store the authenticated adapter for use by llm_tools
         set_adapter(adapter)
-        # Store credentials in environment for future use in this session
-        os.environ["GARMIN_EMAIL"] = email
-        os.environ["GARMIN_PASSWORD"] = password
+        # Clean up pending adapter
+        if "pending_adapter" in st.session_state:
+            del st.session_state.pending_adapter
         return True, name, False
     except MFARequiredError:
-        # Store credentials for step 2
+        # Store adapter for MFA step 2 (must reuse same session!)
+        st.session_state.pending_adapter = adapter
         os.environ["GARMIN_EMAIL"] = email
         os.environ["GARMIN_PASSWORD"] = password
         return False, "2FA code required", True
@@ -170,7 +181,7 @@ elif not st.session_state.garmin_connected:
         
         # Step 2: 2FA Code
         else:
-            st.info("📧 A 2FA code has been sent to your email.")
+            st.info("📧 A 2FA code has been sent to your email. Use the **most recent** code if you received multiple.")
             mfa_code = st.text_input("Enter 2FA Code", key="mfa_code", 
                                       placeholder="123456", max_chars=6)
             
@@ -188,7 +199,7 @@ elif not st.session_state.garmin_connected:
                             st.session_state.awaiting_mfa = False
                             st.rerun()
                         else:
-                            st.error(f"❌ Invalid code. Please check and try again.")
+                            st.error(f"❌ {friendly_error(result)}")
             with col_b:
                 if st.button("← Back", use_container_width=True):
                     st.session_state.awaiting_mfa = False
