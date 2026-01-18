@@ -1,22 +1,21 @@
 import json
-from pathlib import Path
 from datetime import datetime
 from langchain.tools import tool
 from garmin_adapter import GarminAdapter
 from workout_manager import WorkoutManager
 
-PROJECT_DIR = Path(__file__).parent
-SUGGESTED_PLAN_FILE = PROJECT_DIR / "suggested_plan.json"
-USER_TRAINING_DATA_FILE = PROJECT_DIR / "user_training_data.json"
-
 # Global adapter - set by app.py after successful login
+# Also stores per-session data (full_activities, last_plan) to avoid shared files
 _shared_adapter = None
+_session_data = {}
 
 
 def set_adapter(adapter):
     """Set the shared Garmin adapter (called by app.py after login)."""
-    global _shared_adapter
+    global _shared_adapter, _session_data
     _shared_adapter = adapter
+    # Reset session data for new login
+    _session_data = {"full_activities": [], "last_plan": []}
 
 
 def _get_adapter():
@@ -178,16 +177,12 @@ def fetch_user_context(goal: str = "", notes: str = "") -> str:
                     "note": "Use speed_ms values for workout targetValueOne/Two"
                 }
         
-        # Save full training data to file for detailed access
-        full_data = {
-            "fetched_at": datetime.now().isoformat(),
-            "summary": summary,
-            "full_activities": full_activities,
-        }
-        with open(USER_TRAINING_DATA_FILE, "w") as f:
-            json.dump(full_data, f, indent=2, ensure_ascii=False)
+        # Store full training data in session (not file - for multi-user safety)
+        global _session_data
+        _session_data["full_activities"] = full_activities
+        _session_data["fetched_at"] = datetime.now().isoformat()
         
-        summary["note"] = "Full activity details saved to user_training_data.json - use read_training_data tool for more detail"
+        summary["note"] = "Full activity details available - use read_training_data tool for more detail"
         
         return json.dumps(summary, indent=2, ensure_ascii=False)
         
@@ -198,7 +193,7 @@ def fetch_user_context(goal: str = "", notes: str = "") -> str:
 @tool
 def read_training_data() -> str:
     """
-    Reads the full training data file with detailed activity information.
+    Reads the full training data with detailed activity information.
     
     Use this to see more details about the user's recent runs, including:
     - Full distance and duration
@@ -210,12 +205,15 @@ def read_training_data() -> str:
     Returns:
         JSON with full activity details
     """
+    global _session_data
     try:
-        if not USER_TRAINING_DATA_FILE.exists():
-            return "No training data file found. Call fetch_user_context first."
+        if not _session_data.get("full_activities"):
+            return "No training data available. Call fetch_user_context first."
         
-        with open(USER_TRAINING_DATA_FILE, "r") as f:
-            data = json.load(f)
+        data = {
+            "fetched_at": _session_data.get("fetched_at"),
+            "full_activities": _session_data["full_activities"]
+        }
         
         return json.dumps(data, indent=2, ensure_ascii=False)
     except Exception as e:
@@ -283,9 +281,9 @@ def create_and_upload_plan(plan_json: str, confirmed: bool = False) -> str:
         if not plan_data:
             return "Error: Plan is empty"
         
-        # Save plan for reference
-        with open(SUGGESTED_PLAN_FILE, "w") as f:
-            json.dump(plan_data, f, indent=2)
+        # Store plan in session (not file - for multi-user safety)
+        global _session_data
+        _session_data["last_plan"] = plan_data
         
         # If not confirmed, show preview
         if not confirmed:
