@@ -329,21 +329,22 @@ def create_and_upload_plan(plan_json: str, confirmed: bool = False) -> str:
 
 
 @tool
-def get_training_status() -> str:
+def get_fitness_metrics() -> str:
     """
-    Gets the user's current training status from Garmin.
+    Gets the user's current fitness metrics from Garmin.
     
     Includes:
     - VO2 Max
     - Training load (7-day acute, 28-day chronic)
     - Training status (productive, maintaining, detraining, etc.)
-    - Recovery time
+    - Recovery time and readiness score
+    - HRV (heart rate variability)
     - Load focus (anaerobic, high aerobic, low aerobic)
     
-    Use this to understand the user's current fitness level and training balance.
+    Use this to understand the user's current fitness level, recovery status, and training balance.
     
     Returns:
-        JSON with training status metrics
+        JSON with fitness and training metrics
     """
     try:
         adapter = _get_adapter()
@@ -392,4 +393,4 @@ def get_training_status() -> str:
         return json.dumps(result, indent=2, ensure_ascii=False)
         
     except Exception as e:
-        return f"Error getting training status: {str(e)}"
+        return f"Error getting fitness metrics: {str(e)}"

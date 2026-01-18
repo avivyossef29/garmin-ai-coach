@@ -6,11 +6,38 @@ from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage, AIMessage
 from dotenv import load_dotenv
 
-from llm_tools import fetch_user_context, read_training_data, create_and_upload_plan, set_adapter
+from llm_tools import fetch_user_context, read_training_data, create_and_upload_plan, get_fitness_metrics, set_adapter
 from garmin_adapter import GarminAdapter, MFARequiredError
 
 # Load environment variables
 load_dotenv()
+
+
+def friendly_error(error):
+    """Convert technical errors to user-friendly messages."""
+    error_str = str(error).lower()
+    
+    if "401" in error_str or "unauthorized" in error_str:
+        return "Invalid email or password. Please check your credentials."
+    elif "mfa" in error_str or "2fa" in error_str:
+        return "Two-factor authentication required."
+    elif "timeout" in error_str or "timed out" in error_str:
+        return "Connection timed out. Please try again."
+    elif "network" in error_str or "connection" in error_str:
+        return "Network error. Please check your internet connection."
+    elif "rate limit" in error_str or "429" in error_str:
+        return "Too many requests. Please wait a moment and try again."
+    elif "404" in error_str:
+        return "Service temporarily unavailable. Please try again later."
+    elif "openai" in error_str or "api_key" in error_str:
+        return "OpenAI API key is invalid or missing."
+    else:
+        # Keep it short - just the first line, no stack trace
+        first_line = str(error).split('\n')[0]
+        if len(first_line) > 100:
+            return first_line[:100] + "..."
+        return first_line
+
 
 # Create .env from env.example if .env does not exist
 if not os.path.exists(".env") and os.path.exists("env.example"):
@@ -139,7 +166,7 @@ elif not st.session_state.garmin_connected:
                         st.session_state.awaiting_mfa = True
                         st.rerun()
                     else:
-                        st.error(f"Connection failed: {result}")
+                        st.error(f"❌ {friendly_error(result)}")
         
         # Step 2: 2FA Code
         else:
@@ -161,7 +188,7 @@ elif not st.session_state.garmin_connected:
                             st.session_state.awaiting_mfa = False
                             st.rerun()
                         else:
-                            st.error(f"Verification failed: {result}")
+                            st.error(f"❌ Invalid code. Please check and try again.")
             with col_b:
                 if st.button("← Back", use_container_width=True):
                     st.session_state.awaiting_mfa = False
@@ -175,11 +202,11 @@ else:
                 context = fetch_user_context.invoke({})
                 st.session_state.user_context = context
             except Exception as e:
-                st.session_state.user_context = f"Error fetching data: {e}"
+                st.session_state.user_context = f"Could not load Garmin data: {friendly_error(e)}"
     
     # Initialize Agent with user context in system prompt
     if "agent" not in st.session_state:
-        tools = [fetch_user_context, read_training_data, create_and_upload_plan]
+        tools = [fetch_user_context, read_training_data, get_fitness_metrics, create_and_upload_plan]
         today = datetime.now().strftime("%Y-%m-%d")
         populated_prompt = SYSTEM_PROMPT.format(
             today=today,
@@ -245,4 +272,4 @@ Keep it concise but complete. End by asking: "Is there anything else I should kn
                 st.markdown(output)
                 st.session_state.messages.append({"role": "assistant", "content": output})
             except Exception as e:
-                st.error(f"An error occurred: {e}")
+                st.error(f"❌ {friendly_error(e)}")
