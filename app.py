@@ -100,7 +100,8 @@ def attempt_garmin_login(email, password, mfa_code=None):
             adapter.login(mfa_code=mfa_code)
         
         name = adapter.client.get_full_name()
-        # Store the authenticated adapter for use by llm_tools
+        # Store the authenticated adapter in session state and for use by llm_tools
+        st.session_state.garmin_adapter = adapter
         set_adapter(adapter)
         # Clean up pending adapter
         if "pending_adapter" in st.session_state:
@@ -124,6 +125,22 @@ if "garmin_connected" not in st.session_state:
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
+
+# Check for existing adapter in session state and restore if valid
+if "garmin_adapter" in st.session_state and st.session_state.garmin_adapter:
+    adapter = st.session_state.garmin_adapter
+    # Verify session is still valid by testing a simple API call
+    try:
+        adapter.client.get_full_name()
+        # Session is valid - restore connection
+        st.session_state.garmin_connected = True
+        st.session_state.garmin_user = adapter.client.get_full_name()
+        set_adapter(adapter)  # Sync to llm_tools
+    except:
+        # Session expired - clear it and redirect to login
+        del st.session_state.garmin_adapter
+        st.session_state.garmin_connected = False
+        st.session_state.garmin_user = None
 
 # Check for API key from environment (set once, invisible to user)
 if not os.environ.get("OPENAI_API_KEY"):

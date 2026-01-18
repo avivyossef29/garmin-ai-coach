@@ -16,10 +16,27 @@ def set_adapter(adapter):
     _shared_adapter = adapter
     # Reset session data for new login
     _session_data = {"full_activities": [], "last_plan": []}
+    
+    # Also store in Streamlit session state if available
+    try:
+        import streamlit as st
+        if hasattr(st, 'session_state'):
+            st.session_state.garmin_adapter = adapter
+    except:
+        pass  # Streamlit not available (e.g., in tests)
 
 
 def _get_adapter():
     """Get the shared authenticated Garmin adapter."""
+    # First try to get from Streamlit session state
+    try:
+        import streamlit as st
+        if hasattr(st, 'session_state') and 'garmin_adapter' in st.session_state:
+            return st.session_state.garmin_adapter
+    except:
+        pass  # Streamlit not available (e.g., in tests)
+    
+    # Fallback to global variable
     global _shared_adapter
     if _shared_adapter is None:
         raise RuntimeError("Garmin adapter not set. Please login first.")
