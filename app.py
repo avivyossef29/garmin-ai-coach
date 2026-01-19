@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 
 from llm_tools import fetch_user_context, read_training_data, create_and_upload_plan, get_fitness_metrics, set_adapter
 from garmin_adapter import GarminAdapter, MFARequiredError
+from user_storage import save_conversation, load_conversation, save_garmin_token, load_garmin_token
 
 # Load environment variables
 load_dotenv()
@@ -84,9 +85,31 @@ st.markdown("""
 st.title("🏃 Garmin AI Running Coach")
 
 
+def _handle_successful_login(adapter, email):
+    """Handle successful login: save tokens, load conversation."""
+    name = adapter.client.get_full_name()
+    
+    # Save tokens for next time
+    tokens = adapter.get_tokens()
+    if tokens:
+        save_garmin_token(email, tokens)
+    
+    # Store in session
+    st.session_state.garmin_adapter = adapter
+    st.session_state.garmin_email = email
+    set_adapter(adapter)
+    
+    # Load previous conversation
+    previous_messages = load_conversation(email)
+    if previous_messages:
+        st.session_state.messages = previous_messages
+    
+    return True, name, False
+
+
 def attempt_garmin_login(email, password, mfa_code=None):
     """
-    Attempt to login to Garmin.
+    Attempt to login to Garmin, trying saved tokens first.
     
     Returns:
         (success, result, needs_mfa)
@@ -94,29 +117,34 @@ def attempt_garmin_login(email, password, mfa_code=None):
         - result: User name on success, error message on failure
         - needs_mfa: True if 2FA code is required
     """
+    adapter = None
+    
     try:
-        # Reuse existing adapter for MFA step (same session required!)
+        # 1. Try saved tokens first (skip 2FA if tokens still valid)
+        if not mfa_code and "pending_adapter" not in st.session_state:
+            saved_tokens = load_garmin_token(email)
+            if saved_tokens:
+                adapter = GarminAdapter(email=email, password=password, garth_tokens=saved_tokens)
+                adapter.login()
+                return _handle_successful_login(adapter, email)
+        
+        # 2. MFA continuation (reuse pending adapter from step 1)
         if mfa_code and "pending_adapter" in st.session_state:
             adapter = st.session_state.pending_adapter
             adapter.login(mfa_code=mfa_code)
-        else:
-            adapter = GarminAdapter(email=email, password=password)
-            adapter.login(mfa_code=mfa_code)
-        
-        name = adapter.client.get_full_name()
-        # Store the authenticated adapter in session state and for use by llm_tools
-        st.session_state.garmin_adapter = adapter
-        set_adapter(adapter)
-        # Clean up pending adapter
-        if "pending_adapter" in st.session_state:
             del st.session_state.pending_adapter
-        return True, name, False
+            return _handle_successful_login(adapter, email)
+        
+        # 3. Fresh login (no saved tokens)
+        adapter = GarminAdapter(email=email, password=password)
+        adapter.login(mfa_code=mfa_code)
+        return _handle_successful_login(adapter, email)
+        
     except MFARequiredError:
         # Store adapter for MFA step 2 (must reuse same session!)
         st.session_state.pending_adapter = adapter
-        os.environ["GARMIN_EMAIL"] = email
-        os.environ["GARMIN_PASSWORD"] = password
         return False, "2FA code required", True
+    
     except Exception as e:
         return False, str(e), False
 
@@ -161,12 +189,15 @@ if not os.environ.get("OPENAI_API_KEY"):
 with st.sidebar:
     if st.session_state.garmin_connected:
         st.success(f"🏃 {st.session_state.garmin_user}")
-        if st.button("Clear Chat", use_container_width=True):
-            st.session_state.messages = []
-            if "agent" in st.session_state:
-                del st.session_state.agent
-            if "user_context" in st.session_state:
-                del st.session_state.user_context
+        
+        if st.button("🗑️ Logout", use_container_width=True):
+            # Save conversation before logout
+            if "garmin_email" in st.session_state and st.session_state.messages:
+                save_conversation(st.session_state.garmin_email, st.session_state.messages)
+            
+            # Clear session
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
             st.rerun()
 
 SYSTEM_PROMPT = """You are an AI Running Coach with access to the user's Garmin data.
@@ -372,6 +403,10 @@ End with: "Is there anything else I should know about you? (injuries, schedule, 
                         "role": "assistant", 
                         "content": "👋 Hi! I'm your AI Running Coach. I've connected to your Garmin data and I'm ready to help. I can analyze your training, check your fitness metrics, create workouts, or answer running questions. What would you like to do?"
                     })
+                    
+                    # Save fallback greeting
+                    if "garmin_email" in st.session_state:
+                        save_conversation(st.session_state.garmin_email, st.session_state.messages)
 
     # Display Chat History
     for message in st.session_state.messages:
@@ -381,6 +416,11 @@ End with: "Is there anything else I should know about you? (injuries, schedule, 
     # Chat Input
     if prompt := st.chat_input("How can I help with your training today?"):
         st.session_state.messages.append({"role": "user", "content": prompt})
+        
+        # Auto-save after user message
+        if "garmin_email" in st.session_state:
+            save_conversation(st.session_state.garmin_email, st.session_state.messages)
+        
         with st.chat_message("user"):
             st.markdown(prompt)
 
@@ -431,6 +471,10 @@ End with: "Is there anything else I should know about you? (injuries, schedule, 
                 # Run async streaming in sync context
                 output = asyncio.run(stream_agent_events())
                 st.session_state.messages.append({"role": "assistant", "content": output})
+                
+                # Auto-save conversation after each exchange
+                if "garmin_email" in st.session_state:
+                    save_conversation(st.session_state.garmin_email, st.session_state.messages)
                 
             except Exception as e:
                 st.error(f"❌ {friendly_error(e)}")

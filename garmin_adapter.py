@@ -1,6 +1,7 @@
 import os
 import json
 from garminconnect import Garmin
+from garth import Client
 from datetime import datetime, timedelta
 
 class MFARequiredError(Exception):
@@ -8,18 +9,20 @@ class MFARequiredError(Exception):
     pass
 
 class GarminAdapter:
-    def __init__(self, email=None, password=None):
+    def __init__(self, email=None, password=None, garth_tokens=None):
         self.email = email or os.environ.get("GARMIN_EMAIL")
         self.password = password or os.environ.get("GARMIN_PASSWORD")
         self.client = None
         self._mfa_required = False
+        self._garth_tokens = garth_tokens  # Pre-loaded tokens for restoration
 
     def login(self, mfa_code=None):
         """
         Authenticate with Garmin Connect.
         
-        Tokens are kept in memory (self.client) and NOT persisted to filesystem.
-        This ensures proper session isolation in multi-user deployments.
+        Can either:
+        1. Use saved tokens (if provided via garth_tokens in __init__)
+        2. Perform fresh login with email/password
         
         Args:
             mfa_code: Optional 2FA code. If None and 2FA is required, raises MFARequiredError.
@@ -30,6 +33,22 @@ class GarminAdapter:
         Raises:
             MFARequiredError: If 2FA code is needed but not provided
         """
+        # Try to restore from saved tokens first
+        if self._garth_tokens:
+            try:
+                self.client = Garmin(self.email, self.password)
+                # Restore garth session from saved tokens
+                self.client.garth.oauth1_token = self._garth_tokens.get("oauth1_token")
+                self.client.garth.oauth2_token = self._garth_tokens.get("oauth2_token")
+                # Test if tokens are still valid
+                self.client.get_full_name()
+                return True
+            except Exception as e:
+                # Tokens expired or invalid, fall through to fresh login
+                print(f"Saved tokens invalid: {e}")
+                self._garth_tokens = None
+        
+        # Fresh login flow
         def prompt_mfa():
             if mfa_code:
                 return mfa_code
@@ -54,6 +73,19 @@ class GarminAdapter:
                 # Garmin is showing MFA page - need code
                 raise MFARequiredError("2FA code required")
             raise
+
+    def get_tokens(self):
+        """
+        Extract OAuth tokens from the current session for persistence.
+        Returns dict with oauth1_token and oauth2_token.
+        """
+        if not self.client or not self.client.garth:
+            return None
+        
+        return {
+            "oauth1_token": self.client.garth.oauth1_token,
+            "oauth2_token": self.client.garth.oauth2_token
+        }
 
     def fetch_user_data(self, days_back=7):
         """

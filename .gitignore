@@ -11,6 +11,7 @@ __pycache__/
 
 # Generated data (personal/sensitive)
 data/
+user_data/
 *.json
 *.csv
 !package.json
