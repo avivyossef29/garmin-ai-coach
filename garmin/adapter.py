@@ -194,23 +194,32 @@ class GarminAdapter:
     def schedule_workout(self, workout_id, schedule_date):
         """
         Schedule a workout to a specific date on the Garmin calendar.
+        
+        Args:
+            workout_id: The ID of the workout to schedule
+            schedule_date: datetime object or string in YYYY-MM-DD format
+        
+        Returns:
+            dict with workoutScheduleId and workout details
         """
         if not self.client:
             self.login()
+        
+        # Convert datetime to string if needed
+        if isinstance(schedule_date, datetime):
+            date_str = schedule_date.strftime("%Y-%m-%d")
+        else:
+            date_str = schedule_date
             
-        url = "/workout-service/schedule"
-        payload = {
-            "workoutId": workout_id,
-            "date": schedule_date.strftime("%Y-%m-%d")
-        }
+        url = f"workout-service/schedule/{workout_id}"
+        payload = {"date": date_str}
         
         try:
             response = self.client.garth.post("connectapi", url, json=payload, api=True)
-            return response.json()
+            result = response.json()
+            return result
         except Exception as e:
-            # Known Garmin API issue as of Jan 2026 - scheduling endpoint is broken
-            # See: https://forums.garmin.com/apps-software/mobile-apps-web/f/garmin-connect-web/428777
-            print(f"    Note: Workout created but scheduling failed (known Garmin API issue): {e}")
+            print(f"    ⚠️  Could not schedule workout {workout_id}: {e}")
             return None
 
     def get_existing_workouts(self, limit=200):

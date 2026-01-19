@@ -1,4 +1,5 @@
 import json
+import traceback
 from datetime import datetime, timedelta
 from langchain.tools import tool
 from garmin.adapter import GarminAdapter
@@ -320,22 +321,43 @@ def create_and_upload_plan(plan_json: str, confirmed: bool = False) -> str:
         results = []
         success_count = 0
         
-        for workout in plan_data:
+        print(f"\n📤 Uploading {len(plan_data)} workout(s) to Garmin...")
+        
+        for i, workout in enumerate(plan_data, 1):
+            workout_name = workout.get('workoutName', 'Unknown')
+            schedule_date_str = workout.get('scheduleDate', 'No date')
+            
             try:
+                # Convert and upload
                 garmin_json = manager.convert_to_garmin_format(workout)
                 result = adapter.upload_workout(garmin_json)
                 workout_id = result.get('workoutId')
                 
                 if workout_id:
-                    date_str = workout.get('scheduleDate')
-                    schedule_date = datetime.strptime(date_str, "%Y-%m-%d")
-                    adapter.schedule_workout(workout_id, schedule_date)
-                    results.append(f"✓ {workout['workoutName']} scheduled for {date_str}")
-                    success_count += 1
+                    # Schedule the workout
+                    schedule_result = adapter.schedule_workout(workout_id, schedule_date_str)
+                    
+                    if schedule_result:
+                        schedule_id = schedule_result.get('workoutScheduleId')
+                        print(f"  ✅ {workout_name} → scheduled for {schedule_date_str} (ID: {schedule_id})")
+                        results.append(f"✓ {workout_name} scheduled for {schedule_date_str}")
+                        success_count += 1
+                    else:
+                        print(f"  ⚠️  {workout_name} → uploaded but scheduling failed")
+                        results.append(f"⚠ {workout_name} - scheduled failed but workout uploaded")
+                        success_count += 1  # Still count as success since workout was uploaded
                 else:
-                    results.append(f"⚠ {workout['workoutName']} - upload issue")
+                    print(f"  ❌ {workout_name} → no workout ID returned")
+                    results.append(f"⚠ {workout_name} - no workout ID returned")
+                    
             except Exception as e:
-                results.append(f"✗ {workout.get('workoutName', 'Unknown')}: {str(e)}")
+                import traceback
+                error_trace = traceback.format_exc()
+                print(f"  ❌ {workout_name} → ERROR: {e}")
+                print(f"     Traceback:\n{error_trace}")
+                results.append(f"✗ {workout_name}: {str(e)}")
+        
+        print(f"✅ Complete: {success_count}/{len(plan_data)} successful\n")
         
         return f"**Uploaded {success_count}/{len(plan_data)} workouts:**\n" + "\n".join(results)
         
@@ -465,7 +487,8 @@ def get_sidebar_stats():
                     stats['race_name'] = nearest['name']
         except Exception as e:
             # Race data unavailable, leave as None
-            pass
+            print(f"❌ Could not fetch race data: {e}")
+            traceback.print_exc()
         
         # 2. Last 7 days vs previous 7 days mileage (rolling window)
         stats['this_week_km'] = None
@@ -517,6 +540,7 @@ def get_sidebar_stats():
         except Exception as e:
             # Mileage data unavailable
             print(f"❌ Could not fetch mileage data: {e}")
+            traceback.print_exc()
         
         # 3. VO2 Max and Recovery Status (from fitness metrics)
         stats['vo2_max'] = None
@@ -543,6 +567,7 @@ def get_sidebar_stats():
                         print(f"⚠️  VO2 Max not available in data")
             except Exception as e:
                 print(f"❌ Could not fetch VO2 max: {e}")
+                traceback.print_exc()
             
             # Get recovery status from readiness
             try:
@@ -574,9 +599,11 @@ def get_sidebar_stats():
                         print(f"📊 Recovery: {stats['recovery_emoji']} {stats['recovery_status']} (score: {score})")
             except Exception as e:
                 print(f"❌ Could not fetch recovery status: {e}")
+                traceback.print_exc()
         except Exception as e:
             # Fitness metrics unavailable
             print(f"❌ Could not fetch fitness metrics: {e}")
+            traceback.print_exc()
         
         return stats
         
