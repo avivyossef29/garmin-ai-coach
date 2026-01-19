@@ -1,5 +1,5 @@
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from langchain.tools import tool
 from garmin.adapter import GarminAdapter
 from workout_manager import WorkoutManager
@@ -467,41 +467,56 @@ def get_sidebar_stats():
             # Race data unavailable, leave as None
             pass
         
-        # 2. This week vs last week mileage (from recent activities)
+        # 2. Last 7 days vs previous 7 days mileage (rolling window)
         stats['this_week_km'] = None
         stats['last_week_km'] = None
         
         try:
             activities = adapter.client.get_activities(0, 30)  # Get last 30 activities
             
-            # Calculate week boundaries
-            week_start = today - timedelta(days=today.weekday())  # Monday of current week
-            last_week_start = week_start - timedelta(days=7)
+            # Calculate rolling 7-day windows
+            today_date = today.date()
+            last_7_days_start = today_date - timedelta(days=6)  # Today + previous 6 days = 7 days
+            previous_7_days_start = today_date - timedelta(days=13)  # Days 7-13 ago
+            previous_7_days_end = today_date - timedelta(days=7)
             
-            this_week_distance = 0
-            last_week_distance = 0
+            print(f"🔍 Date ranges:")
+            print(f"   Today: {today_date}")
+            print(f"   Last 7 days: {last_7_days_start} to {today_date}")
+            print(f"   Previous 7 days: {previous_7_days_start} to {previous_7_days_end}")
+            
+            last_7_distance = 0
+            previous_7_distance = 0
+            running_count = 0
             
             for act in activities:
                 if act.get("activityType", {}).get("typeKey") == "running":
+                    running_count += 1
                     act_date_str = act.get("startTimeLocal", "")[:10]
                     if act_date_str:
                         try:
-                            act_date = datetime.strptime(act_date_str, "%Y-%m-%d")
+                            act_date = datetime.strptime(act_date_str, "%Y-%m-%d").date()
                             distance_m = act.get("distance", 0)
                             
-                            if act_date >= week_start:
-                                this_week_distance += distance_m
-                            elif act_date >= last_week_start and act_date < week_start:
-                                last_week_distance += distance_m
-                        except:
-                            pass
+                            if last_7_days_start <= act_date <= today_date:
+                                last_7_distance += distance_m
+                                print(f"   ✓ {act_date}: {distance_m/1000:.1f}km (last 7 days)")
+                            elif previous_7_days_start <= act_date <= previous_7_days_end:
+                                previous_7_distance += distance_m
+                                print(f"   ✓ {act_date}: {distance_m/1000:.1f}km (previous 7 days)")
+                        except Exception as e:
+                            print(f"Error parsing activity date {act_date_str}: {e}")
             
-            if this_week_distance > 0 or last_week_distance > 0:
-                stats['this_week_km'] = round(this_week_distance / 1000, 1)
-                stats['last_week_km'] = round(last_week_distance / 1000, 1)
+            print(f"📊 Found {running_count} running activities in last 30")
+            if last_7_distance > 0 or previous_7_distance > 0:
+                stats['this_week_km'] = round(last_7_distance / 1000, 1)
+                stats['last_week_km'] = round(previous_7_distance / 1000, 1)
+                print(f"📊 Mileage stats: Last 7 days={stats['this_week_km']}km, Previous 7 days={stats['last_week_km']}km")
+            else:
+                print(f"⚠️  No mileage data found")
         except Exception as e:
             # Mileage data unavailable
-            pass
+            print(f"❌ Could not fetch mileage data: {e}")
         
         # 3. VO2 Max and Recovery Status (from fitness metrics)
         stats['vo2_max'] = None
@@ -514,16 +529,33 @@ def get_sidebar_stats():
             # Get VO2 Max from training status
             try:
                 status = adapter.client.get_training_status(today_str)
+                
                 if status:
-                    vo2_value = status.get("vo2MaxPreciseValue")
+                    # VO2 Max is nested: mostRecentVO2Max.generic.vo2MaxPreciseValue
+                    most_recent = status.get("mostRecentVO2Max", {})
+                    generic = most_recent.get("generic", {})
+                    vo2_value = generic.get("vo2MaxPreciseValue")
+                    
                     if vo2_value:
                         stats['vo2_max'] = round(vo2_value, 1)
-            except:
-                pass
+                        print(f"📊 VO2 Max: {stats['vo2_max']}")
+                    else:
+                        print(f"⚠️  VO2 Max not available in data")
+            except Exception as e:
+                print(f"❌ Could not fetch VO2 max: {e}")
             
             # Get recovery status from readiness
             try:
-                readiness = adapter.client.get_training_readiness(today_str)
+                readiness_data = adapter.client.get_training_readiness(today_str)
+                
+                # API returns a list, get first item (most recent)
+                readiness = None
+                if readiness_data:
+                    if isinstance(readiness_data, list) and len(readiness_data) > 0:
+                        readiness = readiness_data[0]
+                    elif isinstance(readiness_data, dict):
+                        readiness = readiness_data
+                
                 if readiness:
                     level = readiness.get("level", "").lower()
                     score = readiness.get("score")
@@ -539,11 +571,12 @@ def get_sidebar_stats():
                         elif "low" in level or (score and score < 50):
                             stats['recovery_status'] = "poor"
                             stats['recovery_emoji'] = "🔴"
-            except:
-                pass
+                        print(f"📊 Recovery: {stats['recovery_emoji']} {stats['recovery_status']} (score: {score})")
+            except Exception as e:
+                print(f"❌ Could not fetch recovery status: {e}")
         except Exception as e:
             # Fitness metrics unavailable
-            pass
+            print(f"❌ Could not fetch fitness metrics: {e}")
         
         return stats
         

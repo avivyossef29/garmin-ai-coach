@@ -148,23 +148,23 @@ with st.sidebar:
                     race_name = stats.get('race_name', 'Race')
                     days = stats['days_until_race']
                     if days == 0:
-                        st.metric("🎯 Race Day", "Today!")
+                        st.metric(f"🏁 {race_name}", "Race Day!")
                     elif days == 1:
-                        st.metric("🎯 Race Day", "Tomorrow")
+                        st.metric(f"⏱️ {race_name}", "1 day left")
                     else:
-                        st.metric("🎯 Race Day", f"{days} days", help=race_name)
+                        st.metric(f"⏱️ {race_name}", f"{days} days left")
                 
                 # Weekly mileage comparison (only if available)
                 if stats.get('this_week_km') is not None or stats.get('last_week_km') is not None:
-                    this_week = stats.get('this_week_km', 0)
-                    last_week = stats.get('last_week_km', 0)
+                    last_7 = stats.get('this_week_km', 0)
+                    prev_7 = stats.get('last_week_km', 0)
                     
-                    if last_week > 0:
-                        delta = this_week - last_week
-                        st.metric("🏃 This Week", f"{this_week} km", 
-                                 delta=f"{delta:+.1f} km vs last week")
+                    if prev_7 > 0:
+                        delta = last_7 - prev_7
+                        st.metric("🏃 Last 7 Days", f"{last_7} km", 
+                                 delta=f"{delta:+.1f} km")
                     else:
-                        st.metric("🏃 This Week", f"{this_week} km")
+                        st.metric("🏃 Last 7 Days", f"{last_7} km")
                 
                 # VO2 Max (only if available)
                 if stats.get('vo2_max') is not None:
@@ -173,9 +173,9 @@ with st.sidebar:
                 # Recovery status (only if available)
                 if stats.get('recovery_emoji') is not None and stats.get('recovery_status') is not None:
                     status_map = {
-                        'ready': 'Ready',
-                        'fair': 'Fair',
-                        'poor': 'Rest Needed'
+                        'ready': 'Ready to Train',
+                        'fair': 'Moderate',
+                        'poor': 'Need Rest'
                     }
                     status_text = status_map.get(stats['recovery_status'], 'Unknown')
                     st.metric(f"{stats['recovery_emoji']} Recovery", status_text)

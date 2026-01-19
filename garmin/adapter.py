@@ -241,6 +241,11 @@ class GarminAdapter:
         if not self.client:
             self.login()
         
+        # Check if get_calendar method exists
+        if not hasattr(self.client, 'get_calendar'):
+            print("⚠️  Calendar API not available in this version of garminconnect")
+            return []
+        
         workouts = []
         today = datetime.now()
         end_date = today + timedelta(days=days_ahead)
