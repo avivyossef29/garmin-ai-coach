@@ -226,3 +226,110 @@ class GarminAdapter:
         
         url = f"/workout-service/workout/{workout_id}"
         self.client.garth.delete("connectapi", url, api=True)
+
+    def fetch_calendar_workouts(self, days_ahead=14):
+        """
+        Fetch scheduled workouts from Garmin calendar for the next N days.
+        
+        Returns a list of workout events with:
+        - date: date string (YYYY-MM-DD)
+        - workout_name: name of the workout (or "Workout" if missing)
+        - workout_type: classified type (easy, tempo, intervals, other)
+        - description: workout description
+        - color: emoji for visual indication (🟢/🟡/🔴/⚪)
+        """
+        if not self.client:
+            self.login()
+        
+        workouts = []
+        today = datetime.now()
+        end_date = today + timedelta(days=days_ahead)
+        
+        # Determine which months to fetch
+        months_to_fetch = set()
+        current = today
+        while current <= end_date:
+            months_to_fetch.add((current.year, current.month))
+            # Move to next month
+            if current.month == 12:
+                current = datetime(current.year + 1, 1, 1)
+            else:
+                current = datetime(current.year, current.month + 1, 1)
+        
+        # Fetch calendar data for each month
+        for year, month in sorted(months_to_fetch):
+            try:
+                calendar = self.client.get_calendar(year, month)
+                
+                # Parse calendar structure
+                for week in calendar.get('calendarWeeks', []):
+                    for day in week.get('calendarDays', []):
+                        # Get the date for this day
+                        day_date_str = day.get('calendarDate')
+                        if not day_date_str:
+                            continue
+                        
+                        try:
+                            day_date = datetime.strptime(day_date_str, "%Y-%m-%d")
+                        except:
+                            continue
+                        
+                        # Only include workouts in our date range
+                        if not (today.date() <= day_date.date() <= end_date.date()):
+                            continue
+                        
+                        # Look for workout items
+                        for item in day.get('calendarItems', []):
+                            item_type = item.get('itemType', '')
+                            
+                            # Check for various workout-related item types
+                            if item_type in ['WORKOUT', 'SCHEDULED_WORKOUT']:
+                                workout_name = item.get('workoutName') or item.get('title') or "Workout"
+                                description = item.get('description', '')
+                                
+                                # Classify workout type
+                                workout_type, color = self._classify_workout(workout_name, description)
+                                
+                                workouts.append({
+                                    'date': day_date_str,
+                                    'workout_name': workout_name,
+                                    'workout_type': workout_type,
+                                    'description': description,
+                                    'color': color,
+                                    'date_obj': day_date  # For sorting
+                                })
+            except Exception as e:
+                # Skip this month if there's an error
+                print(f"Warning: Could not fetch calendar for {year}-{month}: {e}")
+                continue
+        
+        # Sort by date
+        workouts.sort(key=lambda x: x['date_obj'])
+        
+        # Remove the date_obj helper field
+        for w in workouts:
+            del w['date_obj']
+        
+        return workouts
+    
+    def _classify_workout(self, name, description):
+        """
+        Classify workout type based on name and description.
+        Returns: (type_name, emoji_color)
+        """
+        # Combine name and description for keyword search
+        text = (name + " " + description).lower()
+        
+        # Check for workout types (order matters - check specific before general)
+        if any(keyword in text for keyword in ['interval', 'speed', 'repeat', 'x800', 'x1000', 'x400', 'fartlek']):
+            return 'intervals', '🔴'
+        elif any(keyword in text for keyword in ['tempo', 'threshold', 'lt', 'lactate']):
+            return 'tempo', '🟡'
+        elif any(keyword in text for keyword in ['easy', 'recovery', 'base', 'aerobic']):
+            return 'easy', '🟢'
+        elif any(keyword in text for keyword in ['long', 'endurance']):
+            return 'long', '🟢'
+        elif any(keyword in text for keyword in ['rest', 'off']):
+            return 'rest', '⚪'
+        else:
+            return 'other', '⚪'

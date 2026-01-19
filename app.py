@@ -345,67 +345,143 @@ End with: "Is there anything else I should know about you? (injuries, schedule, 
                             "content": "👋 Hi! I'm your AI Running Coach. I've connected to your Garmin data. How can I help?"
                         })
 
-    # Display Chat History
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+    # Create tabs for Chat and Calendar views
+    chat_tab, calendar_tab = st.tabs(["💬 Chat", "📅 Calendar"])
+    
+    with chat_tab:
+        # Display Chat History
+        for message in st.session_state.messages:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
 
-    # Chat Input
-    if prompt := st.chat_input("How can I help with your training today?"):
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        
-        # Auto-save after user message
-        if "user_id" in st.session_state:
-            save_conversation_by_id(st.session_state.user_id, st.session_state.messages)
-        
-        with st.chat_message("user"):
-            st.markdown(prompt)
+        # Chat Input
+        if prompt := st.chat_input("How can I help with your training today?"):
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            
+            # Auto-save after user message
+            if "user_id" in st.session_state:
+                save_conversation_by_id(st.session_state.user_id, st.session_state.messages)
+            
+            with st.chat_message("user"):
+                st.markdown(prompt)
 
-        with st.chat_message("assistant"):
-            try:
-                chat_history = []
-                for msg in st.session_state.messages:
-                    if msg["role"] == "user":
-                        chat_history.append(HumanMessage(content=msg["content"]))
-                    else:
-                        chat_history.append(AIMessage(content=msg["content"]))
+            with st.chat_message("assistant"):
+                try:
+                    chat_history = []
+                    for msg in st.session_state.messages:
+                        if msg["role"] == "user":
+                            chat_history.append(HumanMessage(content=msg["content"]))
+                        else:
+                            chat_history.append(AIMessage(content=msg["content"]))
 
-                async def stream_agent_events():
-                    """Stream events from the agent and update UI in real-time."""
-                    response_placeholder = st.empty()
-                    full_response = ""
-                    tool_statuses = {}
+                    async def stream_agent_events():
+                        """Stream events from the agent and update UI in real-time."""
+                        response_placeholder = st.empty()
+                        full_response = ""
+                        tool_statuses = {}
+                        
+                        async for event in st.session_state.agent.astream_events(
+                            {"messages": chat_history},
+                            version="v2"
+                        ):
+                            kind = event["event"]
+                            
+                            if kind == "on_chat_model_stream":
+                                content = event["data"]["chunk"].content
+                                if content:
+                                    full_response += content
+                                    response_placeholder.markdown(full_response + "▌")
+                            
+                            elif kind == "on_tool_start":
+                                tool_name = event.get("name", "tool")
+                                tool_statuses[tool_name] = st.status(f"🔧 Using {tool_name}...", state="running")
+                            
+                            elif kind == "on_tool_end":
+                                tool_name = event.get("name", "tool")
+                                if tool_name in tool_statuses:
+                                    tool_statuses[tool_name].update(state="complete")
+                        
+                        response_placeholder.markdown(full_response)
+                        return full_response
                     
-                    async for event in st.session_state.agent.astream_events(
-                        {"messages": chat_history},
-                        version="v2"
-                    ):
-                        kind = event["event"]
-                        
-                        if kind == "on_chat_model_stream":
-                            content = event["data"]["chunk"].content
-                            if content:
-                                full_response += content
-                                response_placeholder.markdown(full_response + "▌")
-                        
-                        elif kind == "on_tool_start":
-                            tool_name = event.get("name", "tool")
-                            tool_statuses[tool_name] = st.status(f"🔧 Using {tool_name}...", state="running")
-                        
-                        elif kind == "on_tool_end":
-                            tool_name = event.get("name", "tool")
-                            if tool_name in tool_statuses:
-                                tool_statuses[tool_name].update(state="complete")
+                    output = asyncio.run(stream_agent_events())
+                    st.session_state.messages.append({"role": "assistant", "content": output})
                     
-                    response_placeholder.markdown(full_response)
-                    return full_response
+                    # Auto-save after response
+                    if "user_id" in st.session_state:
+                        save_conversation_by_id(st.session_state.user_id, st.session_state.messages)
+                    
+                except Exception as e:
+                    st.error(f"❌ {friendly_error(e)}")
+    
+    with calendar_tab:
+        st.markdown("### 📅 Upcoming Workouts")
+        st.markdown("View your scheduled workouts for the next 2 weeks")
+        
+        try:
+            # Fetch calendar workouts
+            adapter = st.session_state.garmin_adapter
+            workouts = adapter.fetch_calendar_workouts(days_ahead=14)
+            
+            if not workouts:
+                st.info("🏃 No workouts scheduled for the next 2 weeks. Ask the coach to create a training plan!")
+            else:
+                # Group workouts by week
+                from collections import defaultdict
+                weeks = defaultdict(list)
                 
-                output = asyncio.run(stream_agent_events())
-                st.session_state.messages.append({"role": "assistant", "content": output})
+                for workout in workouts:
+                    workout_date = datetime.strptime(workout['date'], "%Y-%m-%d")
+                    # Get Monday of the week
+                    week_start = workout_date - timedelta(days=workout_date.weekday())
+                    week_key = week_start.strftime("%Y-%m-%d")
+                    weeks[week_key].append(workout)
                 
-                # Auto-save after response
-                if "user_id" in st.session_state:
-                    save_conversation_by_id(st.session_state.user_id, st.session_state.messages)
-                
-            except Exception as e:
-                st.error(f"❌ {friendly_error(e)}")
+                # Display each week
+                for week_start_str in sorted(weeks.keys()):
+                    week_start = datetime.strptime(week_start_str, "%Y-%m-%d")
+                    week_end = week_start + timedelta(days=6)
+                    
+                    st.markdown(f"#### Week of {week_start.strftime('%b %d')} - {week_end.strftime('%b %d')}")
+                    
+                    # Create 7 columns for the week
+                    cols = st.columns(7)
+                    
+                    # Create a lookup for workouts by date
+                    week_workouts = {w['date']: w for w in weeks[week_start_str]}
+                    
+                    # Display each day
+                    for i in range(7):
+                        day_date = week_start + timedelta(days=i)
+                        day_str = day_date.strftime("%Y-%m-%d")
+                        
+                        with cols[i]:
+                            # Day header
+                            day_name = day_date.strftime("%a")
+                            day_num = day_date.strftime("%d")
+                            
+                            # Highlight today
+                            if day_date.date() == datetime.now().date():
+                                st.markdown(f"**{day_name}**  \n**{day_num}** 📍")
+                            else:
+                                st.markdown(f"{day_name}  \n{day_num}")
+                            
+                            # Show workout if exists
+                            if day_str in week_workouts:
+                                workout = week_workouts[day_str]
+                                
+                                # Display with color emoji and name
+                                with st.expander(f"{workout['color']} {workout['workout_type'].title()}", expanded=False):
+                                    st.markdown(f"**{workout['workout_name']}**")
+                                    if workout['description']:
+                                        st.markdown(workout['description'])
+                            else:
+                                # Empty day
+                                st.markdown("—")
+                    
+                    st.markdown("---")
+        
+        except Exception as e:
+            st.warning(f"Unable to load calendar. Please try again later.")
+            print(f"Calendar error: {e}")
+
