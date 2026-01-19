@@ -13,6 +13,9 @@ from garmin_adapter import GarminAdapter, MFARequiredError
 # Load environment variables
 load_dotenv()
 
+# Dev mode - skip expensive initial context fetch and greeting
+DEV_MODE = os.getenv("DEV_MODE", "false").lower() == "true"
+
 
 def friendly_error(error):
     """Convert technical errors to user-friendly messages."""
@@ -319,13 +322,17 @@ elif not st.session_state.garmin_connected:
 else:
     # Auto-fetch user context on first load
     if "user_context" not in st.session_state:
-        with st.spinner("Fetching your Garmin data..."):
-            try:
-                # Call the tool function directly (not through the agent)
-                context = fetch_user_context.invoke({})
-                st.session_state.user_context = context
-            except Exception as e:
-                st.session_state.user_context = f"Could not load Garmin data: {friendly_error(e)}"
+        if DEV_MODE:
+            # Skip expensive API call in dev mode
+            st.session_state.user_context = "Dev mode: No user context loaded. User can ask questions or request data fetch."
+        else:
+            with st.spinner("Fetching your Garmin data..."):
+                try:
+                    # Call the tool function directly (not through the agent)
+                    context = fetch_user_context.invoke({})
+                    st.session_state.user_context = context
+                except Exception as e:
+                    st.session_state.user_context = f"Could not load Garmin data: {friendly_error(e)}"
     
     # Initialize Agent with user context in system prompt
     if "agent" not in st.session_state:
@@ -341,8 +348,8 @@ else:
             system_prompt=populated_prompt,
         )
         
-        # Generate initial greeting with user summary
-        if len(st.session_state.messages) == 0:
+        # Generate initial greeting with user summary (skip in dev mode)
+        if len(st.session_state.messages) == 0 and not DEV_MODE:
             with st.spinner("Analyzing your training data..."):
                 try:
                     intro_response = st.session_state.agent.invoke({
