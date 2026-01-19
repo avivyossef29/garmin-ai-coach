@@ -411,3 +411,150 @@ def get_fitness_metrics() -> str:
         
     except Exception as e:
         return f"Error getting fitness metrics: {str(e)}"
+
+
+def get_sidebar_stats():
+    """
+    Get quick stats for sidebar display (no tool decorator - called directly from UI).
+    
+    Returns dict with available metrics, using None for missing data:
+    - days_until_race: int or None
+    - race_name: str or None
+    - this_week_km: float or None
+    - last_week_km: float or None
+    - vo2_max: float or None
+    - recovery_status: str ('ready', 'fair', 'poor') or None
+    - recovery_emoji: str or None
+    """
+    try:
+        adapter = _get_adapter()
+        global _session_data
+        
+        stats = {}
+        today = datetime.now()
+        
+        # 1. Days until race (from fetch_user_context data if available)
+        stats['days_until_race'] = None
+        stats['race_name'] = None
+        
+        try:
+            # Check if we have user context with race info
+            plans_data = adapter.client.get_training_plans()
+            plans = plans_data.get("trainingPlanList", [])
+            if plans:
+                # Find the earliest upcoming race
+                upcoming_races = []
+                for p in plans:
+                    race_date_str = p.get("endDate", "")[:10] if p.get("endDate") else None
+                    if race_date_str:
+                        try:
+                            race_date = datetime.strptime(race_date_str, "%Y-%m-%d")
+                            if race_date >= today:
+                                upcoming_races.append({
+                                    "name": p.get("name", "Race"),
+                                    "date": race_date,
+                                    "days_until": (race_date - today).days
+                                })
+                        except:
+                            pass
+                
+                if upcoming_races:
+                    # Get the nearest race
+                    nearest = min(upcoming_races, key=lambda x: x['days_until'])
+                    stats['days_until_race'] = nearest['days_until']
+                    stats['race_name'] = nearest['name']
+        except Exception as e:
+            # Race data unavailable, leave as None
+            pass
+        
+        # 2. This week vs last week mileage (from recent activities)
+        stats['this_week_km'] = None
+        stats['last_week_km'] = None
+        
+        try:
+            activities = adapter.client.get_activities(0, 30)  # Get last 30 activities
+            
+            # Calculate week boundaries
+            week_start = today - timedelta(days=today.weekday())  # Monday of current week
+            last_week_start = week_start - timedelta(days=7)
+            
+            this_week_distance = 0
+            last_week_distance = 0
+            
+            for act in activities:
+                if act.get("activityType", {}).get("typeKey") == "running":
+                    act_date_str = act.get("startTimeLocal", "")[:10]
+                    if act_date_str:
+                        try:
+                            act_date = datetime.strptime(act_date_str, "%Y-%m-%d")
+                            distance_m = act.get("distance", 0)
+                            
+                            if act_date >= week_start:
+                                this_week_distance += distance_m
+                            elif act_date >= last_week_start and act_date < week_start:
+                                last_week_distance += distance_m
+                        except:
+                            pass
+            
+            if this_week_distance > 0 or last_week_distance > 0:
+                stats['this_week_km'] = round(this_week_distance / 1000, 1)
+                stats['last_week_km'] = round(last_week_distance / 1000, 1)
+        except Exception as e:
+            # Mileage data unavailable
+            pass
+        
+        # 3. VO2 Max and Recovery Status (from fitness metrics)
+        stats['vo2_max'] = None
+        stats['recovery_status'] = None
+        stats['recovery_emoji'] = None
+        
+        try:
+            today_str = today.strftime("%Y-%m-%d")
+            
+            # Get VO2 Max from training status
+            try:
+                status = adapter.client.get_training_status(today_str)
+                if status:
+                    vo2_value = status.get("vo2MaxPreciseValue")
+                    if vo2_value:
+                        stats['vo2_max'] = round(vo2_value, 1)
+            except:
+                pass
+            
+            # Get recovery status from readiness
+            try:
+                readiness = adapter.client.get_training_readiness(today_str)
+                if readiness:
+                    level = readiness.get("level", "").lower()
+                    score = readiness.get("score")
+                    
+                    # Map readiness level to status
+                    if level or score:
+                        if "high" in level or (score and score >= 75):
+                            stats['recovery_status'] = "ready"
+                            stats['recovery_emoji'] = "🟢"
+                        elif "moderate" in level or "medium" in level or (score and 50 <= score < 75):
+                            stats['recovery_status'] = "fair"
+                            stats['recovery_emoji'] = "🟡"
+                        elif "low" in level or (score and score < 50):
+                            stats['recovery_status'] = "poor"
+                            stats['recovery_emoji'] = "🔴"
+            except:
+                pass
+        except Exception as e:
+            # Fitness metrics unavailable
+            pass
+        
+        return stats
+        
+    except Exception as e:
+        # Return empty stats if adapter not available
+        return {
+            'days_until_race': None,
+            'race_name': None,
+            'this_week_km': None,
+            'last_week_km': None,
+            'vo2_max': None,
+            'recovery_status': None,
+            'recovery_emoji': None
+        }

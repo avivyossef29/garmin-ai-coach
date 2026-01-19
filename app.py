@@ -9,7 +9,7 @@ from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage, AIMessage
 from dotenv import load_dotenv
 
-from llm_tools import fetch_user_context, read_training_data, create_and_upload_plan, get_fitness_metrics, set_adapter
+from llm_tools import fetch_user_context, read_training_data, create_and_upload_plan, get_fitness_metrics, set_adapter, get_sidebar_stats
 from garmin import MFARequiredError, attempt_garmin_login
 from garmin.adapter import GarminAdapter
 from user_storage import save_conversation_by_id, get_user_id, load_garmin_token_by_id, load_conversation_by_id, load_garmin_username_by_id
@@ -127,6 +127,63 @@ with st.sidebar:
     if st.session_state.garmin_connected:
         st.success(f"🏃 {st.session_state.garmin_user}")
         
+        # Quick Stats section
+        try:
+            stats = get_sidebar_stats()
+            
+            # Only show stats header if we have at least one stat to display
+            has_any_stat = any([
+                stats.get('days_until_race') is not None,
+                stats.get('this_week_km') is not None,
+                stats.get('vo2_max') is not None,
+                stats.get('recovery_emoji') is not None
+            ])
+            
+            if has_any_stat:
+                st.markdown("---")
+                st.markdown("### 📊 Quick Stats")
+                
+                # Days until race (only if available)
+                if stats.get('days_until_race') is not None:
+                    race_name = stats.get('race_name', 'Race')
+                    days = stats['days_until_race']
+                    if days == 0:
+                        st.metric("🎯 Race Day", "Today!")
+                    elif days == 1:
+                        st.metric("🎯 Race Day", "Tomorrow")
+                    else:
+                        st.metric("🎯 Race Day", f"{days} days", help=race_name)
+                
+                # Weekly mileage comparison (only if available)
+                if stats.get('this_week_km') is not None or stats.get('last_week_km') is not None:
+                    this_week = stats.get('this_week_km', 0)
+                    last_week = stats.get('last_week_km', 0)
+                    
+                    if last_week > 0:
+                        delta = this_week - last_week
+                        st.metric("🏃 This Week", f"{this_week} km", 
+                                 delta=f"{delta:+.1f} km vs last week")
+                    else:
+                        st.metric("🏃 This Week", f"{this_week} km")
+                
+                # VO2 Max (only if available)
+                if stats.get('vo2_max') is not None:
+                    st.metric("💪 VO2 Max", stats['vo2_max'])
+                
+                # Recovery status (only if available)
+                if stats.get('recovery_emoji') is not None and stats.get('recovery_status') is not None:
+                    status_map = {
+                        'ready': 'Ready',
+                        'fair': 'Fair',
+                        'poor': 'Rest Needed'
+                    }
+                    status_text = status_map.get(stats['recovery_status'], 'Unknown')
+                    st.metric(f"{stats['recovery_emoji']} Recovery", status_text)
+        except Exception as e:
+            # If stats fail, don't crash the sidebar - just skip them
+            pass
+        
+        st.markdown("---")
         if st.button("🗑️ Logout", use_container_width=True):
             # Save conversation before logout
             if "user_id" in st.session_state and st.session_state.messages:
