@@ -1,6 +1,7 @@
 import streamlit as st
 import os
 import shutil
+import asyncio
 from datetime import datetime
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage, AIMessage
@@ -385,13 +386,44 @@ End with: "Is there anything else I should know about you? (injuries, schedule, 
                     else:
                         chat_history.append(AIMessage(content=msg["content"]))
 
-                with st.spinner("Thinking..."):
-                    response = st.session_state.agent.invoke(
-                        {"messages": chat_history}
-                    )
-
-                output = response["messages"][-1].content
-                st.markdown(output)
+                # Async function to stream agent response
+                async def stream_agent_events():
+                    """Stream events from the agent and update UI in real-time."""
+                    response_placeholder = st.empty()
+                    full_response = ""
+                    tool_statuses = {}
+                    
+                    async for event in st.session_state.agent.astream_events(
+                        {"messages": chat_history},
+                        version="v2"
+                    ):
+                        kind = event["event"]
+                        
+                        # Stream LLM tokens as they're generated
+                        if kind == "on_chat_model_stream":
+                            content = event["data"]["chunk"].content
+                            if content:
+                                full_response += content
+                                # Show cursor while streaming
+                                response_placeholder.markdown(full_response + "▌")
+                        
+                        # Show tool execution status
+                        elif kind == "on_tool_start":
+                            tool_name = event.get("name", "tool")
+                            tool_statuses[tool_name] = st.status(f"🔧 Using {tool_name}...", state="running")
+                        
+                        elif kind == "on_tool_end":
+                            tool_name = event.get("name", "tool")
+                            if tool_name in tool_statuses:
+                                tool_statuses[tool_name].update(state="complete")
+                    
+                    # Final update without cursor
+                    response_placeholder.markdown(full_response)
+                    return full_response
+                
+                # Run async streaming in sync context
+                output = asyncio.run(stream_agent_events())
                 st.session_state.messages.append({"role": "assistant", "content": output})
+                
             except Exception as e:
                 st.error(f"❌ {friendly_error(e)}")
