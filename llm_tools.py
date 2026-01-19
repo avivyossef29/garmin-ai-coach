@@ -321,43 +321,59 @@ def create_and_upload_plan(plan_json: str, confirmed: bool = False) -> str:
         results = []
         success_count = 0
         
-        print(f"\n📤 Uploading {len(plan_data)} workout(s) to Garmin...")
+        print("======================================================================")
+        print(f"🔧 UPLOADING {len(plan_data)} WORKOUTS")
+        print("======================================================================")
         
         for i, workout in enumerate(plan_data, 1):
             workout_name = workout.get('workoutName', 'Unknown')
             schedule_date_str = workout.get('scheduleDate', 'No date')
             
+            print(f"📋 Workout {i}/{len(plan_data)}: {workout_name}")
+            print(f"   Schedule date: {schedule_date_str}")
+            print(f"   Input workout JSON: {json.dumps(workout, indent=2)}")
+            
             try:
                 # Convert and upload
+                print("   ⚙️  Converting to Garmin format...")
                 garmin_json = manager.convert_to_garmin_format(workout)
+                print(f"   ✓ Converted successfully")
+                print(f"   Garmin JSON: {json.dumps(garmin_json, indent=2)}")
+                
+                print("   📤 Uploading to Garmin...")
                 result = adapter.upload_workout(garmin_json)
+                print(f"   ✓ Upload response: {json.dumps(result, indent=2)}")
                 workout_id = result.get('workoutId')
                 
                 if workout_id:
-                    # Schedule the workout
+                    print(f"   Workout ID: {workout_id}")
+                    print(f"   📅 Scheduling workout {workout_id} for {schedule_date_str}...")
                     schedule_result = adapter.schedule_workout(workout_id, schedule_date_str)
+                    print(f"   Schedule response: {json.dumps(schedule_result, indent=2) if schedule_result else 'None'}")
                     
                     if schedule_result:
                         schedule_id = schedule_result.get('workoutScheduleId')
-                        print(f"  ✅ {workout_name} → scheduled for {schedule_date_str} (ID: {schedule_id})")
+                        print(f"   ✅ SCHEDULED! Schedule ID: {schedule_id}")
                         results.append(f"✓ {workout_name} scheduled for {schedule_date_str}")
                         success_count += 1
                     else:
-                        print(f"  ⚠️  {workout_name} → uploaded but scheduling failed")
+                        print(f"   ❌ SCHEDULING FAILED")
                         results.append(f"⚠ {workout_name} - scheduled failed but workout uploaded")
                         success_count += 1  # Still count as success since workout was uploaded
                 else:
-                    print(f"  ❌ {workout_name} → no workout ID returned")
+                    print(f"   ❌ NO WORKOUT ID in response")
                     results.append(f"⚠ {workout_name} - no workout ID returned")
                     
             except Exception as e:
                 import traceback
                 error_trace = traceback.format_exc()
-                print(f"  ❌ {workout_name} → ERROR: {e}")
-                print(f"     Traceback:\n{error_trace}")
+                print(f"   ❌ ERROR: {e}")
+                print(f"   Full traceback:\n{error_trace}")
                 results.append(f"✗ {workout_name}: {str(e)}")
         
-        print(f"✅ Complete: {success_count}/{len(plan_data)} successful\n")
+        print("======================================================================")
+        print(f"✅ Upload complete: {success_count}/{len(plan_data)} successful")
+        print("======================================================================")
         
         return f"**Uploaded {success_count}/{len(plan_data)} workouts:**\n" + "\n".join(results)
         
