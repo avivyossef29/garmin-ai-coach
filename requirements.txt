@@ -1,6 +1,7 @@
 # Core
 streamlit
 python-dotenv
+extra-streamlit-components
 
 # LLM
 langchain

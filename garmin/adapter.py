@@ -34,18 +34,18 @@ class GarminAdapter:
             MFARequiredError: If 2FA code is needed but not provided
         """
         # Try to restore from saved tokens first
-        if self._garth_tokens:
+        if self._garth_tokens and not mfa_code:
             try:
                 self.client = Garmin(self.email, self.password)
-                # Restore garth session from saved tokens
-                self.client.garth.oauth1_token = self._garth_tokens.get("oauth1_token")
-                self.client.garth.oauth2_token = self._garth_tokens.get("oauth2_token")
+                # Restore garth session from saved token string
+                self.client.garth.loads(self._garth_tokens)
                 # Test if tokens are still valid
                 self.client.get_full_name()
+                print("✅ Restored from saved tokens, skipping 2FA")
                 return True
             except Exception as e:
                 # Tokens expired or invalid, fall through to fresh login
-                print(f"Saved tokens invalid: {e}")
+                print(f"❌ Saved tokens invalid: {e}, will request fresh login")
                 self._garth_tokens = None
         
         # Fresh login flow
@@ -77,15 +77,13 @@ class GarminAdapter:
     def get_tokens(self):
         """
         Extract OAuth tokens from the current session for persistence.
-        Returns dict with oauth1_token and oauth2_token.
+        Returns base64-encoded JSON string via garth.dumps().
         """
         if not self.client or not self.client.garth:
             return None
         
-        return {
-            "oauth1_token": self.client.garth.oauth1_token,
-            "oauth2_token": self.client.garth.oauth2_token
-        }
+        # Use garth's built-in serialization
+        return self.client.garth.dumps()
 
     def fetch_user_data(self, days_back=7):
         """

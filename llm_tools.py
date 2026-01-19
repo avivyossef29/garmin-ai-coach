@@ -1,7 +1,7 @@
 import json
 from datetime import datetime
 from langchain.tools import tool
-from garmin_adapter import GarminAdapter
+from garmin.adapter import GarminAdapter
 from workout_manager import WorkoutManager
 
 # Global adapter - set by app.py after successful login
