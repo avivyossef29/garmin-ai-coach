@@ -1,33 +1,36 @@
-import streamlit as st
 import os
-import time
 import shutil
-import asyncio
-from datetime import datetime, timedelta
+
 import extra_streamlit_components as stx
-from langchain.agents import create_agent
-from langchain_core.messages import HumanMessage, AIMessage
+import streamlit as st
 from dotenv import load_dotenv
 
-from llm_tools import fetch_user_context, read_training_data, create_and_upload_plan, get_fitness_metrics, set_adapter, get_sidebar_stats
-from garmin import MFARequiredError, attempt_garmin_login
-from garmin.adapter import GarminAdapter
-from user_storage import save_conversation_by_id, get_user_id, load_garmin_token_by_id, load_conversation_by_id, load_garmin_username_by_id
+from auth_helpers import (
+    init_session_state,
+    restore_session_from_cookie,
+    restore_adapter_from_state,
+    render_login_flow,
+    logout_user,
+)
+from chat_helpers import run_chat_ui
 from config import SYSTEM_PROMPT, DEV_MODE
-from ui_helpers import friendly_error, render_sidebar_stats
+from llm_tools import (
+    fetch_user_context,
+    read_training_data,
+    create_and_upload_plan,
+    get_fitness_metrics,
+    get_sidebar_stats,
+)
+from ui_helpers import render_sidebar, friendly_error
 
-# Load environment variables
 load_dotenv()
 
 
-# Create .env from env.example if .env does not exist
 if not os.path.exists(".env") and os.path.exists("env.example"):
     shutil.copy("env.example", ".env")
 
-# Page Config
 st.set_page_config(page_title="Garmin AI Coach", page_icon="🏃", layout="wide")
 
-# Custom CSS for bigger fonts
 st.markdown("""
 <style>
     /* Main content text */
@@ -53,314 +56,26 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Title
 st.title("🏃 Garmin AI Running Coach")
 
-# Initialize CookieManager (use consistent key to persist across reruns)
 cookie_manager = stx.CookieManager(key="garmin_cookies")
 
-# Initialize session state
-if "garmin_connected" not in st.session_state:
-    st.session_state.garmin_connected = False
-    st.session_state.garmin_user = None
-    st.session_state.awaiting_mfa = False
+init_session_state()
+restore_session_from_cookie(cookie_manager)
+restore_adapter_from_state()
 
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+api_ready = render_sidebar(get_sidebar_stats, lambda: logout_user(cookie_manager))
 
-# Try to restore session from cookie (persists across browser refresh/close)
-if not st.session_state.garmin_connected:
-    all_cookies = cookie_manager.get_all()
-    print(f"🍪 All cookies: {all_cookies}")
-    saved_user_id = cookie_manager.get("garmin_user_id")
-    print(f"🍪 Cookie read: garmin_user_id = {saved_user_id}")
-    if saved_user_id:
-        saved_token = load_garmin_token_by_id(saved_user_id)
-        saved_username = load_garmin_username_by_id(saved_user_id)
-        if saved_token:
-            try:
-                # Restore from saved token - no email/password needed!
-                adapter = GarminAdapter(garth_tokens=saved_token)
-                adapter.login()
-                # Success! Restore full session
-                print(f"✅ Restored session from cookie for user {saved_user_id[:8]}...")
-                st.session_state.garmin_connected = True
-                # Use saved username, fallback to API call, then default
-                st.session_state.garmin_user = saved_username or adapter.client.get_full_name() or "User"
-                st.session_state.user_id = saved_user_id
-                st.session_state.garmin_adapter = adapter
-                set_adapter(adapter)
-                # Load saved conversation (chat history)
-                saved_messages = load_conversation_by_id(saved_user_id)
-                if saved_messages:
-                    st.session_state.messages = saved_messages
-            except Exception as e:
-                # Token expired or invalid - clear cookie and show login
-                print(f"🍪 Cookie restore FAILED: {e}, deleting cookie")
-                cookie_manager.delete("garmin_user_id")
-
-# Fallback: Check for existing adapter in session state (same browser tab, no refresh)
-if "garmin_adapter" in st.session_state and st.session_state.garmin_adapter and not st.session_state.garmin_connected:
-    adapter = st.session_state.garmin_adapter
-    try:
-        adapter.client.get_full_name()
-        st.session_state.garmin_connected = True
-        st.session_state.garmin_user = adapter.client.get_full_name()
-        set_adapter(adapter)
-    except:
-        del st.session_state.garmin_adapter
-        st.session_state.garmin_connected = False
-        st.session_state.garmin_user = None
-
-# Check for API key from environment
-if not os.environ.get("OPENAI_API_KEY"):
-    with st.sidebar:
-        st.header("⚙️ Setup Required")
-        api_key = st.text_input("OpenAI API Key", type="password", key="openai_key", 
-                                help="Get your key from platform.openai.com")
-        if api_key:
-            os.environ["OPENAI_API_KEY"] = api_key
-            st.rerun()
-
-# Sidebar - Show status when connected
-with st.sidebar:
-    if st.session_state.garmin_connected:
-        st.success(f"🏃 {st.session_state.garmin_user}")
-        
-        # Quick Stats section
-        try:
-            stats = get_sidebar_stats()
-            render_sidebar_stats(stats)
-        except Exception as e:
-            # If stats fail, don't crash the sidebar - just print error for debugging
-            print(f"❌ Sidebar stats error: {e}")
-            import traceback
-            traceback.print_exc()
-        
-        st.markdown("---")
-        if st.button("🗑️ Logout", use_container_width=True):
-            # Save conversation before logout
-            if "user_id" in st.session_state and st.session_state.messages:
-                save_conversation_by_id(st.session_state.user_id, st.session_state.messages)
-            
-            # Delete the cookie
-            print(f"🍪 Cookie DELETE: garmin_user_id (logout)")
-            cookie_manager.delete("garmin_user_id")
-            
-            # Clear session state
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
-            st.rerun()
-
-# Main content - Connection flow
-if not os.environ.get("OPENAI_API_KEY"):
+if not api_ready:
     st.info("👈 Please enter your OpenAI API key in the sidebar to get started.")
 elif not st.session_state.garmin_connected:
-    # Garmin Connection UI
-    st.markdown("### Connect to Garmin")
-    st.markdown("Enter your Garmin credentials. If you've logged in before with these credentials, you'll skip 2FA!")
-    
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        # Step 1: Email/Password
-        if not st.session_state.awaiting_mfa:
-            garmin_email = st.text_input("Garmin Email", key="garmin_email_input", 
-                                          placeholder="your.email@example.com")
-            garmin_password = st.text_input("Garmin Password", type="password", key="garmin_password_input")
-            
-            if st.button("🔗 Connect to Garmin", use_container_width=True, type="primary", 
-                         disabled=not (garmin_email and garmin_password)):
-                with st.spinner("Connecting to Garmin..."):
-                    success, result, needs_mfa = attempt_garmin_login(garmin_email, garmin_password)
-                    if success:
-                        st.session_state.garmin_connected = True
-                        st.session_state.garmin_user = result
-                        # Set cookie for 30-day persistence
-                        user_id = get_user_id(garmin_email, garmin_password)
-                        st.session_state.user_id = user_id
-                        expire_date = datetime.now() + timedelta(days=30)
-                        cookie_manager.set("garmin_user_id", user_id, expires_at=expire_date)
-                        print(f"🍪 Cookie SET: garmin_user_id = {user_id}, expires = {expire_date}")
-                        if "garmin_adapter" in st.session_state:
-                            set_adapter(st.session_state.garmin_adapter)
-                        time.sleep(0.5)  # Give browser time to save cookie
-                        st.rerun()
-                    elif needs_mfa:
-                        st.session_state.awaiting_mfa = True
-                        st.rerun()
-                    else:
-                        st.error(f"❌ {friendly_error(result)}")
-        
-        # Step 2: 2FA Code
-        else:
-            st.info("📧 A 2FA code has been sent to your email. Use the **most recent** code if you received multiple.")
-            mfa_code = st.text_input("Enter 2FA Code", key="mfa_code", 
-                                      placeholder="123456", max_chars=6)
-            
-            col_a, col_b = st.columns(2)
-            with col_a:
-                if st.button("✓ Submit Code", use_container_width=True, type="primary",
-                             disabled=not mfa_code):
-                    with st.spinner("Verifying..."):
-                        # Use stored credentials from MFA step 1
-                        email = st.session_state.get("pending_email", "")
-                        password = st.session_state.get("pending_password", "")
-                        
-                        if not email or not password:
-                            st.error("❌ Session expired. Please start over.")
-                            st.session_state.awaiting_mfa = False
-                            st.rerun()
-                        
-                        success, result, _ = attempt_garmin_login(email, password, mfa_code=mfa_code)
-                        if success:
-                            st.session_state.garmin_connected = True
-                            st.session_state.garmin_user = result
-                            st.session_state.awaiting_mfa = False
-                            # Set cookie for 30-day persistence
-                            user_id = get_user_id(email, password)
-                            st.session_state.user_id = user_id
-                            expire_date = datetime.now() + timedelta(days=30)
-                            cookie_manager.set("garmin_user_id", user_id, expires_at=expire_date)
-                            print(f"🍪 Cookie SET (MFA): garmin_user_id = {user_id}, expires = {expire_date}")
-                            # Clean up pending credentials
-                            for key in ["pending_email", "pending_password", "pending_adapter"]:
-                                if key in st.session_state:
-                                    del st.session_state[key]
-                            if "garmin_adapter" in st.session_state:
-                                set_adapter(st.session_state.garmin_adapter)
-                            time.sleep(0.5)  # Give browser time to save cookie
-                            st.rerun()
-                        else:
-                            st.error(f"❌ {friendly_error(result)}")
-            with col_b:
-                if st.button("← Back", use_container_width=True):
-                    st.session_state.awaiting_mfa = False
-                    for key in ["pending_adapter", "pending_email", "pending_password"]:
-                        if key in st.session_state:
-                            del st.session_state[key]
-                    st.rerun()
+    render_login_flow(cookie_manager)
 else:
-    # Connected - show chat interface
-    
-    # Auto-fetch user context on first load (skip in DEV_MODE)
-    if "user_context" not in st.session_state:
-        if DEV_MODE:
-            st.session_state.user_context = "Dev mode: Garmin data not loaded. Ask me to fetch it if needed."
-        else:
-            with st.spinner("Fetching your Garmin data..."):
-                try:
-                    context = fetch_user_context.invoke({})
-                    st.session_state.user_context = context
-                except Exception as e:
-                    st.session_state.user_context = f"Could not load Garmin data: {friendly_error(e)}"
-    
-    # Initialize Agent
-    if "agent" not in st.session_state:
-        tools = [fetch_user_context, read_training_data, get_fitness_metrics, create_and_upload_plan]
-        today = datetime.now().strftime("%Y-%m-%d")
-        populated_prompt = SYSTEM_PROMPT.format(
-            today=today,
-            user_context=st.session_state.user_context
-        )
-        st.session_state.agent = create_agent(
-            "openai:gpt-4o-mini",  
-            tools=tools,
-            system_prompt=populated_prompt,
-        )
-        
-        # Generate initial greeting ONLY if no messages AND not DEV_MODE
-        if len(st.session_state.messages) == 0:
-            if DEV_MODE:
-                # Simple greeting in dev mode
-                st.session_state.messages.append({
-                    "role": "assistant", 
-                    "content": "👋 Hi! I'm your AI Running Coach (DEV MODE). How can I help?"
-                })
-            else:
-                with st.spinner("Analyzing your training data..."):
-                    try:
-                        intro_response = st.session_state.agent.invoke({
-                            "messages": [HumanMessage(content="""Introduce yourself as an AI Running Coach. Briefly summarize what you know about the user:
-- Name and current fitness level
-- Training goal (if any race planned)
-- Recent training highlights
-- Key metrics (race predictions, suggested paces)
-
-Keep it concise (8-15 sentences max). 
-
-End with: "Is there anything else I should know about you? (injuries, schedule, preferences) Otherwise, how can I help today?"
-""")]
-                        })
-                        intro_message = intro_response["messages"][-1].content
-                        st.session_state.messages.append({"role": "assistant", "content": intro_message})
-                    except Exception as e:
-                        st.session_state.messages.append({
-                            "role": "assistant", 
-                            "content": "👋 Hi! I'm your AI Running Coach. I've connected to your Garmin data. How can I help?"
-                        })
-
-    # Display Chat History
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-
-    # Chat Input
-    if prompt := st.chat_input("How can I help with your training today?"):
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        
-        # Auto-save after user message
-        if "user_id" in st.session_state:
-            save_conversation_by_id(st.session_state.user_id, st.session_state.messages)
-        
-        with st.chat_message("user"):
-            st.markdown(prompt)
-
-        with st.chat_message("assistant"):
-            try:
-                chat_history = []
-                for msg in st.session_state.messages:
-                    if msg["role"] == "user":
-                        chat_history.append(HumanMessage(content=msg["content"]))
-                    else:
-                        chat_history.append(AIMessage(content=msg["content"]))
-
-                async def stream_agent_events():
-                    """Stream events from the agent and update UI in real-time."""
-                    response_placeholder = st.empty()
-                    full_response = ""
-                    tool_statuses = {}
-                    
-                    async for event in st.session_state.agent.astream_events(
-                        {"messages": chat_history},
-                        version="v2"
-                    ):
-                        kind = event["event"]
-                        
-                        if kind == "on_chat_model_stream":
-                            content = event["data"]["chunk"].content
-                            if content:
-                                full_response += content
-                                response_placeholder.markdown(full_response + "▌")
-                        
-                        elif kind == "on_tool_start":
-                            tool_name = event.get("name", "tool")
-                            tool_statuses[tool_name] = st.status(f"🔧 Using {tool_name}...", state="running")
-                        
-                        elif kind == "on_tool_end":
-                            tool_name = event.get("name", "tool")
-                            if tool_name in tool_statuses:
-                                tool_statuses[tool_name].update(state="complete")
-                    
-                    response_placeholder.markdown(full_response)
-                    return full_response
-                
-                output = asyncio.run(stream_agent_events())
-                st.session_state.messages.append({"role": "assistant", "content": output})
-                
-                # Auto-save after response
-                if "user_id" in st.session_state:
-                    save_conversation_by_id(st.session_state.user_id, st.session_state.messages)
-                
-            except Exception as e:
-                st.error(f"❌ {friendly_error(e)}")
+    tools = [fetch_user_context, read_training_data, get_fitness_metrics, create_and_upload_plan]
+    run_chat_ui(
+        system_prompt=SYSTEM_PROMPT,
+        dev_mode=DEV_MODE,
+        tools=tools,
+        friendly_error=friendly_error,
+    )
 
