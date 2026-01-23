@@ -108,7 +108,6 @@ def _set_login_cookie(cookie_manager, user_id):
 def render_login_flow(cookie_manager):
     """Render the Garmin login + MFA flow and update session state."""
     st.markdown("### Connect to Garmin")
-    st.markdown("Enter your Garmin credentials. If you've logged in before with these credentials, you'll skip 2FA!")
 
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
@@ -147,7 +146,7 @@ def render_login_flow(cookie_manager):
                     else:
                         st.error(f"❌ {friendly_error(result)}")
         else:
-            st.info("📧 A 2FA code has been sent to your email. Use the most recent code if you received multiple.")
+            st.info("📧 A 2FA code has been sent to your email.")
             mfa_code = st.text_input(
                 "Enter 2FA Code",
                 key="mfa_code",
