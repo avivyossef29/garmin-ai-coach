@@ -385,8 +385,10 @@ def create_and_upload_plan(plan_json: str, confirmed: bool = False) -> str:
         return f"**Uploaded {success_count}/{len(plan_data)} workouts:**\n" + "\n".join(results)
         
     except json.JSONDecodeError as e:
+        _log(logging.ERROR, f"❌ JSON decode error: {e}")
         return f"Error: Invalid JSON - {e}"
     except Exception as e:
+        _log(logging.ERROR, f"❌ Unexpected error: {e}")
         return f"Error: {str(e)}"
 
 
