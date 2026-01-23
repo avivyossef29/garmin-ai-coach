@@ -41,7 +41,7 @@ python3 -m venv venv
 ```
 
 ### 2. Configuration
-Create a file named .env in the root directory and add your keys:
+Create a file named .env in the root directory and add your keys (you can only add the OpenAI key):
 ```bash
 # .env file
 GARMIN_EMAIL=your_email@example.com
