@@ -1,72 +1,60 @@
-# Garmin Workout Uploader
+# Garmin AI Coach 🏃‍♂️🤖
 
-This script uploads your marathon training workouts to Garmin Connect, which can then be synced to your Garmin watch.
+> **"The LLM didn't know my training history. My Garmin did. So I connected them."**
 
-## Setup
+## 📖 The Story
+Last week, I faced one of the biggest fears in marathon training.
 
-1. **Virtual environment is already created** - located in `venv/`
+Only 7 weeks before the Tel Aviv Marathon, I finished a 33k long run with an uncomfortable feeling in my Achilles. Like almost everyone today, I tried to consult an LLM for advice.
 
-2. **Dependencies are installed** - `garminconnect` and all required packages
+**But I realized the LLM is missing a lot of data.**
+It doesn't know my last workouts, my weekly balance, my body metrics, or my specific goal (3:14 pace).
 
-## Usage
+**Do you know who does? My Garmin watch.**
 
-### First Time Setup
+So the solution was simple: I wrote a Python tool that lets the LLM pull this information, analyze my condition, and **push** adapted workouts directly to my training calendar.
 
-If you're having authentication issues, test your credentials first:
+## 🚀 What This Project Does
+This is an agentic workflow that connects the **Garmin Connect API** with **LLM reasoning**.
 
+1.  **Pulls Data:** Fetches my actual recent runs, heart rate, and training load from Garmin.
+2.  **Analyzes Context:** Feeds the specific biometric data + my marathon goals into the LLM.
+3.  **Acts:** Creates a structured workout file and uploads it back to my watch for the next training session.
+
+## 🛠️ Tech Stack
+* **Python** (Core logic)
+* **Streamlit** (UI & Visualization)
+* **Garmin Connect API** (Data ingestion & workout upload)
+* **OpenAI API / LLM** (Reasoning & planning)
+
+## 🏃‍♂️ How to Run It
+
+### 1. Installation
 ```bash
-source venv/bin/activate
-python test_auth.py
+# Clone the repo
+git clone [https://github.com/avivyossef29/garmin-ai-coach.git](https://github.com/avivyossef29/garmin-ai-coach.git)
+cd garmin-ai-coach
+
+# Create virtual env & install dependencies
+python3 -m venv venv
+./venv/bin/pip install -r requirements.txt
 ```
 
-This will prompt you for your email and password and test the connection.
-
-### Running the Main Script
-
+### 2. Configuration
+Create a file named .env in the root directory and add your keys:
 ```bash
-source venv/bin/activate
-python workouts.py
+# .env file
+GARMIN_EMAIL=your_email@example.com
+GARMIN_PASSWORD=your_password
+OPENAI_API_KEY=sk-proj-...
 ```
 
-The script will:
-1. Log in to Garmin Connect (using credentials in `workouts.py`)
-2. Upload all defined workouts to your Garmin account
-3. Save authentication tokens to `~/.garminconnect` for future use
+### 3. Run the App
+```bash
+./venv/bin/streamlit run app.py
+```
 
-### Syncing to Your Watch
+### 👨‍💻 About Me
+I'm Aviv Yossef, an M.Sc. Computer Science student at Tel Aviv University. I built this because I believe AI agents should be grounded in real-world data, not just text. (And because I really want to make it to the starting line in Tel Aviv!)
 
-After the workouts are uploaded:
-1. Open the Garmin Connect app on your phone
-2. Sync your watch
-3. The workouts will appear in your watch's workout list
-
-## Troubleshooting
-
-### Authentication Errors (401 Unauthorized)
-
-If you get authentication errors:
-
-1. **Verify credentials**: Check that your email and password in `workouts.py` are correct
-2. **2FA**: If you have two-factor authentication enabled, you'll be prompted for the code during login
-3. **Clear tokens**: If login keeps failing, try deleting stored tokens:
-   ```bash
-   rm -rf ~/.garminconnect
-   ```
-   Then run the script again
-
-4. **Test authentication**: Use `test_auth.py` to verify your credentials work
-
-### Updating Credentials
-
-Edit the `EMAIL` and `PASSWORD` variables at the top of `workouts.py` (lines 8-9).
-
-## Workouts
-
-The script uploads workouts for weeks 1-7 of your marathon training plan, including:
-- Aerobic runs with marathon pace intervals
-- Long runs with MP blocks
-- Speed intervals
-- Tempo runs
-- Taper workouts
-
-All workouts are configured with your target paces for a sub-3:14 marathon.
+See you at the Marathon! 
