@@ -1,14 +1,22 @@
 import json
+import logging
 import traceback
 from datetime import datetime, timedelta
 from langchain.tools import tool
 from garmin.adapter import GarminAdapter
 from workout_manager import WorkoutManager
+from config import DEV_MODE
 
 # Global adapter - set by app.py after successful login
 # Also stores per-session data (full_activities, last_plan) to avoid shared files
 _shared_adapter = None
 _session_data = {}
+logger = logging.getLogger(__name__)
+
+
+def _log(level, message):
+    if DEV_MODE:
+        logger.log(level, message)
 
 
 def set_adapter(adapter):
@@ -321,59 +329,58 @@ def create_and_upload_plan(plan_json: str, confirmed: bool = False) -> str:
         results = []
         success_count = 0
         
-        print("======================================================================")
-        print(f"🔧 UPLOADING {len(plan_data)} WORKOUTS")
-        print("======================================================================")
+        _log(logging.INFO, "======================================================================")
+        _log(logging.INFO, f"🔧 UPLOADING {len(plan_data)} WORKOUTS")
+        _log(logging.INFO, "======================================================================")
         
         for i, workout in enumerate(plan_data, 1):
             workout_name = workout.get('workoutName', 'Unknown')
             schedule_date_str = workout.get('scheduleDate', 'No date')
             
-            print(f"📋 Workout {i}/{len(plan_data)}: {workout_name}")
-            print(f"   Schedule date: {schedule_date_str}")
-            print(f"   Input workout JSON: {json.dumps(workout, indent=2)}")
+            _log(logging.INFO, f"📋 Workout {i}/{len(plan_data)}: {workout_name}")
+            _log(logging.INFO, f"   Schedule date: {schedule_date_str}")
+            _log(logging.INFO, f"   Input workout JSON: {json.dumps(workout, indent=2)}")
             
             try:
                 # Convert and upload
-                print("   ⚙️  Converting to Garmin format...")
+                _log(logging.INFO, "   ⚙️  Converting to Garmin format...")
                 garmin_json = manager.convert_to_garmin_format(workout)
-                print(f"   ✓ Converted successfully")
-                print(f"   Garmin JSON: {json.dumps(garmin_json, indent=2)}")
+                _log(logging.INFO, "   ✓ Converted successfully")
+                _log(logging.INFO, f"   Garmin JSON: {json.dumps(garmin_json, indent=2)}")
                 
-                print("   📤 Uploading to Garmin...")
+                _log(logging.INFO, "   📤 Uploading to Garmin...")
                 result = adapter.upload_workout(garmin_json)
-                print(f"   ✓ Upload response: {json.dumps(result, indent=2)}")
+                _log(logging.INFO, f"   ✓ Upload response: {json.dumps(result, indent=2)}")
                 workout_id = result.get('workoutId')
                 
                 if workout_id:
-                    print(f"   Workout ID: {workout_id}")
-                    print(f"   📅 Scheduling workout {workout_id} for {schedule_date_str}...")
+                    _log(logging.INFO, f"   Workout ID: {workout_id}")
+                    _log(logging.INFO, f"   📅 Scheduling workout {workout_id} for {schedule_date_str}...")
                     schedule_result = adapter.schedule_workout(workout_id, schedule_date_str)
-                    print(f"   Schedule response: {json.dumps(schedule_result, indent=2) if schedule_result else 'None'}")
+                    _log(logging.INFO, f"   Schedule response: {json.dumps(schedule_result, indent=2) if schedule_result else 'None'}")
                     
                     if schedule_result:
                         schedule_id = schedule_result.get('workoutScheduleId')
-                        print(f"   ✅ SCHEDULED! Schedule ID: {schedule_id}")
+                        _log(logging.INFO, f"   ✅ SCHEDULED! Schedule ID: {schedule_id}")
                         results.append(f"✓ {workout_name} scheduled for {schedule_date_str}")
                         success_count += 1
                     else:
-                        print(f"   ❌ SCHEDULING FAILED")
+                        _log(logging.WARNING, "   ❌ SCHEDULING FAILED")
                         results.append(f"⚠ {workout_name} - scheduled failed but workout uploaded")
                         success_count += 1  # Still count as success since workout was uploaded
                 else:
-                    print(f"   ❌ NO WORKOUT ID in response")
+                    _log(logging.WARNING, "   ❌ NO WORKOUT ID in response")
                     results.append(f"⚠ {workout_name} - no workout ID returned")
                     
             except Exception as e:
-                import traceback
                 error_trace = traceback.format_exc()
-                print(f"   ❌ ERROR: {e}")
-                print(f"   Full traceback:\n{error_trace}")
+                _log(logging.ERROR, f"   ❌ ERROR: {e}")
+                _log(logging.INFO, f"   Full traceback:\n{error_trace}")
                 results.append(f"✗ {workout_name}: {str(e)}")
         
-        print("======================================================================")
-        print(f"✅ Upload complete: {success_count}/{len(plan_data)} successful")
-        print("======================================================================")
+        _log(logging.INFO, "======================================================================")
+        _log(logging.INFO, f"✅ Upload complete: {success_count}/{len(plan_data)} successful")
+        _log(logging.INFO, "======================================================================")
         
         return f"**Uploaded {success_count}/{len(plan_data)} workouts:**\n" + "\n".join(results)
         
@@ -503,8 +510,9 @@ def get_sidebar_stats():
                     stats['race_name'] = nearest['name']
         except Exception as e:
             # Race data unavailable, leave as None
-            print(f"❌ Could not fetch race data: {e}")
-            traceback.print_exc()
+            _log(logging.ERROR, f"❌ Could not fetch race data: {e}")
+            if DEV_MODE:
+                traceback.print_exc()
         
         # 2. Last 7 days vs previous 7 days mileage (rolling window)
         stats['this_week_km'] = None
@@ -519,10 +527,10 @@ def get_sidebar_stats():
             previous_7_days_start = today_date - timedelta(days=13)  # Days 7-13 ago
             previous_7_days_end = today_date - timedelta(days=7)
             
-            print(f"🔍 Date ranges:")
-            print(f"   Today: {today_date}")
-            print(f"   Last 7 days: {last_7_days_start} to {today_date}")
-            print(f"   Previous 7 days: {previous_7_days_start} to {previous_7_days_end}")
+            _log(logging.INFO, "🔍 Date ranges:")
+            _log(logging.INFO, f"   Today: {today_date}")
+            _log(logging.INFO, f"   Last 7 days: {last_7_days_start} to {today_date}")
+            _log(logging.INFO, f"   Previous 7 days: {previous_7_days_start} to {previous_7_days_end}")
             
             last_7_distance = 0
             previous_7_distance = 0
@@ -539,24 +547,24 @@ def get_sidebar_stats():
                             
                             if last_7_days_start <= act_date <= today_date:
                                 last_7_distance += distance_m
-                                print(f"   ✓ {act_date}: {distance_m/1000:.1f}km (last 7 days)")
+                                _log(logging.INFO, f"   ✓ {act_date}: {distance_m/1000:.1f}km (last 7 days)")
                             elif previous_7_days_start <= act_date <= previous_7_days_end:
                                 previous_7_distance += distance_m
-                                print(f"   ✓ {act_date}: {distance_m/1000:.1f}km (previous 7 days)")
+                                _log(logging.INFO, f"   ✓ {act_date}: {distance_m/1000:.1f}km (previous 7 days)")
                         except Exception as e:
-                            print(f"Error parsing activity date {act_date_str}: {e}")
+                            _log(logging.WARNING, f"Error parsing activity date {act_date_str}: {e}")
             
-            print(f"📊 Found {running_count} running activities in last 30")
+            _log(logging.INFO, f"📊 Found {running_count} running activities in last 30")
             if last_7_distance > 0 or previous_7_distance > 0:
                 stats['this_week_km'] = round(last_7_distance / 1000, 1)
                 stats['last_week_km'] = round(previous_7_distance / 1000, 1)
-                print(f"📊 Mileage stats: Last 7 days={stats['this_week_km']}km, Previous 7 days={stats['last_week_km']}km")
+                _log(logging.INFO, f"📊 Mileage stats: Last 7 days={stats['this_week_km']}km, Previous 7 days={stats['last_week_km']}km")
             else:
-                print(f"⚠️  No mileage data found")
+                _log(logging.WARNING, "⚠️  No mileage data found")
         except Exception as e:
-            # Mileage data unavailable
-            print(f"❌ Could not fetch mileage data: {e}")
-            traceback.print_exc()
+            _log(logging.ERROR, f"❌ Could not fetch mileage data: {e}")
+            if DEV_MODE:
+                traceback.print_exc()
         
         # 3. VO2 Max and Recovery Status (from fitness metrics)
         stats['vo2_max'] = None
@@ -578,12 +586,13 @@ def get_sidebar_stats():
                     
                     if vo2_value:
                         stats['vo2_max'] = round(vo2_value, 1)
-                        print(f"📊 VO2 Max: {stats['vo2_max']}")
+                        _log(logging.INFO, f"📊 VO2 Max: {stats['vo2_max']}")
                     else:
-                        print(f"⚠️  VO2 Max not available in data")
+                        _log(logging.WARNING, "⚠️  VO2 Max not available in data")
             except Exception as e:
-                print(f"❌ Could not fetch VO2 max: {e}")
-                traceback.print_exc()
+                _log(logging.ERROR, f"❌ Could not fetch VO2 max: {e}")
+                if DEV_MODE:
+                    traceback.print_exc()
             
             # Get recovery status from readiness
             try:
@@ -612,14 +621,15 @@ def get_sidebar_stats():
                         elif "low" in level or (score and score < 50):
                             stats['recovery_status'] = "poor"
                             stats['recovery_emoji'] = "🔴"
-                        print(f"📊 Recovery: {stats['recovery_emoji']} {stats['recovery_status']} (score: {score})")
+                        _log(logging.INFO, f"📊 Recovery: {stats['recovery_emoji']} {stats['recovery_status']} (score: {score})")
             except Exception as e:
-                print(f"❌ Could not fetch recovery status: {e}")
-                traceback.print_exc()
+                _log(logging.ERROR, f"❌ Could not fetch recovery status: {e}")
+                if DEV_MODE:
+                    traceback.print_exc()
         except Exception as e:
-            # Fitness metrics unavailable
-            print(f"❌ Could not fetch fitness metrics: {e}")
-            traceback.print_exc()
+            _log(logging.ERROR, f"❌ Could not fetch fitness metrics: {e}")
+            if DEV_MODE:
+                traceback.print_exc()
         
         return stats
         

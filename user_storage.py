@@ -9,11 +9,20 @@ Security Model:
 - No sensitive data (password) is stored on disk
 """
 
-import os
 import json
+import logging
+import os
 import hashlib
 from datetime import datetime
 from typing import Optional, List, Dict
+from config import DEV_MODE
+
+logger = logging.getLogger(__name__)
+
+
+def _log(level, message):
+    if DEV_MODE:
+        logger.log(level, message)
 
 
 DATA_DIR = "user_data"
@@ -93,7 +102,7 @@ def load_conversation_by_id(user_id: str) -> List[Dict]:
                 data = json.load(f)
                 return data.get("messages", [])
         except Exception as e:
-            print(f"Error loading conversation: {e}")
+            _log(logging.ERROR, f"Error loading conversation: {e}")
             return []
     return []
 
@@ -136,7 +145,7 @@ def load_garmin_token_by_id(user_id: str) -> Optional[str]:
                 data = json.load(f)
                 return data.get("tokens")
         except Exception as e:
-            print(f"Error loading token: {e}")
+            _log(logging.ERROR, f"Error loading token: {e}")
             return None
     return None
 

@@ -1,9 +1,12 @@
+import logging
 import os
 import shutil
 
 import extra_streamlit_components as stx
 import streamlit as st
 from dotenv import load_dotenv
+
+load_dotenv()
 
 from auth_helpers import (
     init_session_state,
@@ -23,7 +26,8 @@ from llm_tools import (
 )
 from ui_helpers import render_sidebar, friendly_error
 
-load_dotenv()
+if DEV_MODE:
+    logging.basicConfig(level=logging.INFO,)
 
 
 if not os.path.exists(".env") and os.path.exists("env.example"):

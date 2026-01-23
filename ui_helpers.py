@@ -1,10 +1,20 @@
 """UI helpers for the Garmin AI Running Coach."""
+import logging
 import os
 import traceback
 from collections import defaultdict
 from datetime import datetime, timedelta
 
 import streamlit as st
+
+from config import DEV_MODE
+
+logger = logging.getLogger(__name__)
+
+
+def _log(level, message):
+    if DEV_MODE:
+        logger.log(level, message)
 
 
 def friendly_error(error):
@@ -57,8 +67,9 @@ def render_sidebar(get_sidebar_stats_fn, on_logout):
                 stats = get_sidebar_stats_fn()
                 render_sidebar_stats(stats)
             except Exception as e:
-                print(f"❌ Sidebar stats error: {e}")
-                traceback.print_exc()
+                _log(logging.ERROR, f"❌ Sidebar stats error: {e}")
+                if DEV_MODE:
+                    traceback.print_exc()
 
             st.markdown("---")
             if st.button("🗑️ Logout", use_container_width=True):
@@ -172,5 +183,6 @@ def render_calendar_tab(adapter):
     
     except Exception as e:
         st.warning("Unable to load calendar. Please try again later.")
-        print(f"❌ Calendar error: {e}")
-        traceback.print_exc()
+        _log(logging.ERROR, f"❌ Calendar error: {e}")
+        if DEV_MODE:
+            traceback.print_exc()

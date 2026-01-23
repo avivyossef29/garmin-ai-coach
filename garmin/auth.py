@@ -3,13 +3,21 @@ Garmin authentication and login flow.
 Handles login with token persistence and 2FA.
 """
 
+import logging
 import streamlit as st
 from .adapter import GarminAdapter, MFARequiredError
+from config import DEV_MODE
 from user_storage import (
     save_garmin_token, load_garmin_token,
     load_conversation, get_user_id
 )
 
+logger = logging.getLogger(__name__)
+
+
+def _log(level, message):
+    if DEV_MODE:
+        logger.log(level, message)
 
 def _handle_successful_login(adapter, email, password):
     """Handle successful login: save tokens and username, load conversation."""
@@ -57,10 +65,10 @@ def attempt_garmin_login(email, password, mfa_code=None):
         if not mfa_code and "pending_adapter" not in st.session_state:
             saved_tokens = load_garmin_token(email, password)
             if saved_tokens:
-                print(f"Found saved token for user, attempting restore...")
+                _log(logging.INFO, "Found saved token for user, attempting restore...")
                 adapter = GarminAdapter(email=email, password=password, garth_tokens=saved_tokens)
                 adapter.login()
-                print("Token restore successful!")
+                _log(logging.INFO, "Token restore successful!")
                 return _handle_successful_login(adapter, email, password)
         
         # 2. MFA continuation (reuse pending adapter from step 1)
@@ -71,7 +79,7 @@ def attempt_garmin_login(email, password, mfa_code=None):
             return _handle_successful_login(adapter, email, password)
         
         # 3. Fresh login (no saved tokens)
-        print("No saved token found, starting fresh login...")
+        _log(logging.INFO, "No saved token found, starting fresh login...")
         adapter = GarminAdapter(email=email, password=password)
         adapter.login(mfa_code=mfa_code)
         return _handle_successful_login(adapter, email, password)
@@ -84,5 +92,5 @@ def attempt_garmin_login(email, password, mfa_code=None):
         return False, "2FA code required", True
     
     except Exception as e:
-        print(f"Login failed: {e}")
+        _log(logging.ERROR, f"Login failed: {e}")
         return False, str(e), False

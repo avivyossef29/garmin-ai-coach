@@ -1,8 +1,10 @@
+import logging
 import time
 from datetime import datetime, timedelta
 
 import streamlit as st
 
+from config import DEV_MODE
 from garmin import attempt_garmin_login
 from garmin.adapter import GarminAdapter
 from llm_tools import set_adapter
@@ -14,6 +16,13 @@ from user_storage import (
     load_conversation_by_id,
     load_garmin_username_by_id,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def _log(level, message):
+    if DEV_MODE:
+        logger.log(level, message)
 
 
 def init_session_state():
@@ -35,9 +44,9 @@ def restore_session_from_cookie(cookie_manager):
         return False
 
     all_cookies = cookie_manager.get_all()
-    print(f"🍪 All cookies: {all_cookies}")
+    _log(logging.INFO, f"🍪 All cookies: {all_cookies}")
     saved_user_id = cookie_manager.get("garmin_user_id")
-    print(f"🍪 Cookie read: garmin_user_id = {saved_user_id}")
+    _log(logging.INFO, f"🍪 Cookie read: garmin_user_id = {saved_user_id}")
 
     if not saved_user_id:
         return False
@@ -50,7 +59,7 @@ def restore_session_from_cookie(cookie_manager):
     try:
         adapter = GarminAdapter(garth_tokens=saved_token)
         adapter.login()
-        print(f"✅ Restored session from cookie for user {saved_user_id[:8]}...")
+        _log(logging.INFO, f"✅ Restored session from cookie for user {saved_user_id[:8]}...")
         st.session_state.garmin_connected = True
         st.session_state.garmin_user = saved_username or adapter.client.get_full_name() or "User"
         st.session_state.user_id = saved_user_id
@@ -62,7 +71,7 @@ def restore_session_from_cookie(cookie_manager):
             st.session_state.messages = saved_messages
         return True
     except Exception as e:
-        print(f"🍪 Cookie restore FAILED: {e}, deleting cookie")
+        _log(logging.WARNING, f"🍪 Cookie restore FAILED: {e}, deleting cookie")
         cookie_manager.delete("garmin_user_id")
         return False
 
@@ -92,7 +101,7 @@ def _set_login_cookie(cookie_manager, user_id):
     """Persist login for future sessions."""
     expire_date = datetime.now() + timedelta(days=30)
     cookie_manager.set("garmin_user_id", user_id, expires_at=expire_date)
-    print(f"🍪 Cookie SET: garmin_user_id = {user_id}, expires = {expire_date}")
+    _log(logging.INFO, f"🍪 Cookie SET: garmin_user_id = {user_id}, expires = {expire_date}")
     time.sleep(0.5)
 
 
@@ -192,7 +201,7 @@ def logout_user(cookie_manager):
     if "user_id" in st.session_state and st.session_state.messages:
         save_conversation_by_id(st.session_state.user_id, st.session_state.messages)
 
-    print("🍪 Cookie DELETE: garmin_user_id (logout)")
+    _log(logging.INFO, "🍪 Cookie DELETE: garmin_user_id (logout)")
     cookie_manager.delete("garmin_user_id")
 
     for key in list(st.session_state.keys()):

@@ -1,8 +1,17 @@
-import os
 import json
+import logging
+import os
 from garminconnect import Garmin
 from garth import Client
 from datetime import datetime, timedelta
+from config import DEV_MODE
+
+logger = logging.getLogger(__name__)
+
+
+def _log(level, message):
+    if DEV_MODE:
+        logger.log(level, message)
 
 class MFARequiredError(Exception):
     """Raised when 2FA code is required."""
@@ -41,11 +50,11 @@ class GarminAdapter:
                 self.client.garth.loads(self._garth_tokens)
                 # Test if tokens are still valid
                 self.client.get_full_name()
-                print("✅ Restored from saved tokens, skipping 2FA")
+                _log(logging.INFO, "✅ Restored from saved tokens, skipping 2FA")
                 return True
             except Exception as e:
                 # Tokens expired or invalid, fall through to fresh login
-                print(f"❌ Saved tokens invalid: {e}, will request fresh login")
+                _log(logging.WARNING, f"❌ Saved tokens invalid: {e}, will request fresh login")
                 self._garth_tokens = None
         
         # Fresh login flow
@@ -95,37 +104,37 @@ class GarminAdapter:
         data = {}
         today = datetime.now().strftime("%Y-%m-%d")
         
-        print("Fetching user profile...")
+        _log(logging.INFO, "Fetching user profile...")
         try:
             data["full_name"] = self.client.get_full_name()
             data["unit_system"] = self.client.get_unit_system()
         except Exception as e:
-            print(f"Warning: Could not fetch profile: {e}")
+            _log(logging.WARNING, f"Warning: Could not fetch profile: {e}")
 
-        print("Fetching stats...")
+        _log(logging.INFO, "Fetching stats...")
         try:
             data["stats"] = self.client.get_stats(today)
             data["user_summary"] = self.client.get_user_summary(today)
         except Exception as e:
-            print(f"Warning: Could not fetch stats: {e}")
+            _log(logging.WARNING, f"Warning: Could not fetch stats: {e}")
             
-        print("Fetching heart rates...")
+        _log(logging.INFO, "Fetching heart rates...")
         try:
             data["heart_rates"] = self.client.get_heart_rates(today)
         except Exception as e:
-            print(f"Warning: Could not fetch heart rates: {e}")
+            _log(logging.WARNING, f"Warning: Could not fetch heart rates: {e}")
             
-        print(f"Fetching recent activities ({days_back} days)...")
+        _log(logging.INFO, f"Fetching recent activities ({days_back} days)...")
         try:
             data["recent_activities"] = self.fetch_recent_activities(days_back)
         except Exception as e:
-             print(f"Warning: Could not fetch recent activities: {e}")
+             _log(logging.WARNING, f"Warning: Could not fetch recent activities: {e}")
              
-        print("Fetching calendar goals...")
+        _log(logging.INFO, "Fetching calendar goals...")
         try:
             data["goals"] = self.fetch_goals()
         except Exception as e:
-            print(f"Warning: Could not fetch goals: {e}")
+            _log(logging.WARNING, f"Warning: Could not fetch goals: {e}")
 
         return data
 
@@ -219,7 +228,7 @@ class GarminAdapter:
             result = response.json()
             return result
         except Exception as e:
-            print(f"    ⚠️  Could not schedule workout {workout_id}: {e}")
+            _log(logging.WARNING, f"    ⚠️  Could not schedule workout {workout_id}: {e}")
             return None
 
     def get_existing_workouts(self, limit=200):
@@ -252,7 +261,7 @@ class GarminAdapter:
         
         # Check if get_calendar method exists
         if not hasattr(self.client, 'get_calendar'):
-            print("⚠️  Calendar API not available in this version of garminconnect")
+            _log(logging.WARNING, "⚠️  Calendar API not available in this version of garminconnect")
             return []
         
         workouts = []
@@ -314,7 +323,7 @@ class GarminAdapter:
                                 })
             except Exception as e:
                 # Skip this month if there's an error
-                print(f"Warning: Could not fetch calendar for {year}-{month}: {e}")
+                _log(logging.WARNING, f"Warning: Could not fetch calendar for {year}-{month}: {e}")
                 continue
         
         # Sort by date
